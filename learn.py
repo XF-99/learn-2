@@ -554,34 +554,12 @@ def _save_force_plot_html(
     max_display: int,
     feature_names_override: Optional[List[str]] = None,
 ) -> None:
-    try:
-        sv = shap_values[sample_idx]
-        vals = np.asarray(sv.values)
-        while vals.ndim > 1:
-            vals = vals[..., 0]
-        vals = vals.reshape(-1).astype(float)
-
-        base_vals = np.asarray(sv.base_values)
-        base = float(base_vals.reshape(-1)[0]) if base_vals.size else 0.0
-
-        features = None
-        if getattr(sv, "data", None) is not None:
-            data_arr = np.asarray(sv.data)
-            while data_arr.ndim > 1:
-                data_arr = data_arr[..., 0]
-            features = data_arr.reshape(-1).astype(float).tolist()
-
-        names = feature_names_override if feature_names_override is not None else getattr(sv, "feature_names", None)
-        force_obj = shap.force_plot(base, vals.tolist(), features=features, feature_names=names, matplotlib=False)
-        shap.save_html(out_html_path, force_obj, full_html=True)
-    except Exception as e:
-        with open(out_html_path.replace(".html", "_skipped.txt"), "w", encoding="utf-8") as f:
-            f.write(f"Failed to save force plot HTML: {e}\n")
-        plt.figure(figsize=(8, 4))
-        shap.plots.waterfall(shap_values[sample_idx], max_display=max_display, show=False)
-        plt.tight_layout()
-        plt.savefig(out_fallback_png, dpi=150)
-        plt.close()
+    # In this project we prefer a stable static artifact over fragile force-HTML export.
+    plt.figure(figsize=(8, 4))
+    shap.plots.waterfall(shap_values[sample_idx], max_display=max_display, show=False)
+    plt.tight_layout()
+    plt.savefig(out_fallback_png, dpi=150)
+    plt.close()
 
 
 def _to_explanation(values, data: np.ndarray, feature_names: List[str], base_value: float):
@@ -591,6 +569,46 @@ def _to_explanation(values, data: np.ndarray, feature_names: List[str], base_val
         return values
     base_values = np.full(shape=(data.shape[0],), fill_value=float(base_value), dtype=float)
     return shap.Explanation(values=np.asarray(values), base_values=base_values, data=data, feature_names=feature_names)
+
+
+def explain_transformer_attention(
+    transformer: TransformerRegressor,
+    X_explain: np.ndarray,
+    out_dir: str,
+    device: torch.device,
+    explain_sample_index: int,
+) -> None:
+    if len(X_explain) == 0:
+        return
+
+    target_idx = int(np.clip(explain_sample_index, 0, len(X_explain) - 1))
+    sample = X_explain[target_idx : target_idx + 1]
+    lookback = sample.shape[1]
+
+    x_one = torch.tensor(sample, dtype=torch.float32, device=device)
+    transformer.eval()
+    with torch.inference_mode():
+        _, attn = transformer(x_one, return_attention=True)
+
+    if attn is None:
+        return
+
+    attn_np = attn.detach().cpu().numpy()[0]
+    attn_avg = attn_np.mean(axis=0)
+
+    plt.figure(figsize=(6, 5))
+    sns.heatmap(
+        attn_avg,
+        cmap="magma",
+        xticklabels=[f"t-{lookback - 1 - i}" for i in range(lookback)],
+        yticklabels=[f"t-{lookback - 1 - i}" for i in range(lookback)],
+    )
+    plt.title("Transformer Attention (last layer, heads avg)")
+    plt.xlabel("Key time step")
+    plt.ylabel("Query time step")
+    plt.tight_layout()
+    plt.savefig(os.path.join(out_dir, "transformer_attention_heatmap_sample.png"), dpi=150)
+    plt.close()
 
 
 def explain_transformer_with_shap(
@@ -606,13 +624,7 @@ def explain_transformer_with_shap(
     seed: int,
 ) -> None:
     if shap is None:
-        with open(os.path.join(out_dir, "explain_skipped.txt"), "w", encoding="utf-8") as f:
-            f.write("shap is not installed. Install shap to enable explainability outputs.\n")
         return
-
-    skip_marker = os.path.join(out_dir, "explain_skipped.txt")
-    if os.path.exists(skip_marker):
-        os.remove(skip_marker)
 
     if len(X_background) == 0 or len(X_explain) == 0:
         return
@@ -684,43 +696,6 @@ def explain_transformer_with_shap(
         feature_names_override=flat_feature_names,
     )
 
-    x_one = torch.tensor(X_ex_seq[target_idx : target_idx + 1], dtype=torch.float32, device=device)
-    with torch.inference_mode():
-        _, attn = transformer(x_one, return_attention=True)
-
-    if attn is not None:
-        attn_np = attn.detach().cpu().numpy()[0]
-        attn_avg = attn_np.mean(axis=0)
-
-        plt.figure(figsize=(6, 5))
-        sns.heatmap(
-            attn_avg,
-            cmap="magma",
-            xticklabels=[f"t-{lookback - 1 - i}" for i in range(lookback)],
-            yticklabels=[f"t-{lookback - 1 - i}" for i in range(lookback)],
-        )
-        plt.title("Transformer Attention (last layer, heads avg)")
-        plt.xlabel("Key time step")
-        plt.ylabel("Query time step")
-        plt.tight_layout()
-        plt.savefig(os.path.join(out_dir, "transformer_attention_heatmap_sample.png"), dpi=150)
-        plt.close()
-
-        attn_last = attn_avg[-1]
-        step_shap = np.abs(sv_one).sum(axis=1)
-        attn_last = attn_last / (attn_last.sum() + 1e-12)
-        step_shap = step_shap / (step_shap.sum() + 1e-12)
-
-        plt.figure(figsize=(8, 3))
-        plt.plot(attn_last, label="attention(last query)")
-        plt.plot(step_shap, label="sum(|SHAP|) per time step")
-        plt.xlabel("time step index")
-        plt.ylabel("normalized score")
-        plt.title("Attention vs SHAP (time-step level)")
-        plt.legend()
-        plt.tight_layout()
-        plt.savefig(os.path.join(out_dir, "transformer_attention_vs_shap_overlay.png"), dpi=150)
-        plt.close()
 
 
 def explain_stacking_with_shap(
@@ -1015,23 +990,33 @@ def run_well(
     if enable_explain:
         explain_dir = os.path.join(out_dir, "explain")
         os.makedirs(explain_dir, exist_ok=True)
-        explain_transformer_with_shap(
+
+        explain_transformer_attention(
             transformer=transformer,
-            X_background=split.X_train,
             X_explain=split.X_test,
-            feature_names=features,
             out_dir=explain_dir,
             device=device,
-            shap_bg_samples=shap_bg_samples,
-            shap_explain_samples=shap_explain_samples,
             explain_sample_index=explain_sample_index,
-            seed=seed,
         )
-        explain_stacking_with_shap(
-            xgb=xgb,
-            stack_features=stack_test_X,
-            out_dir=explain_dir,
-        )
+
+        if shap is not None:
+            explain_transformer_with_shap(
+                transformer=transformer,
+                X_background=split.X_train,
+                X_explain=split.X_test,
+                feature_names=features,
+                out_dir=explain_dir,
+                device=device,
+                shap_bg_samples=shap_bg_samples,
+                shap_explain_samples=shap_explain_samples,
+                explain_sample_index=explain_sample_index,
+                seed=seed,
+            )
+            explain_stacking_with_shap(
+                xgb=xgb,
+                stack_features=stack_test_X,
+                out_dir=explain_dir,
+            )
 
     return pred_df, metrics_map
 
@@ -1080,7 +1065,7 @@ def main() -> None:
     parser.add_argument("--future_steps", type=int, default=30)
     parser.add_argument("--gamma", type=float, default=0.5)
     parser.add_argument("--lambda_t", type=float, default=0.02)
-    parser.add_argument("--enable_explain", action="store_true")
+    parser.add_argument("--disable_explain", action="store_true")
     parser.add_argument("--shap_bg_samples", type=int, default=80)
     parser.add_argument("--shap_explain_samples", type=int, default=40)
     parser.add_argument("--explain_sample_index", type=int, default=0)
@@ -1116,7 +1101,7 @@ def main() -> None:
             future_steps=args.future_steps,
             gamma=args.gamma,
             lambda_t=args.lambda_t,
-            enable_explain=args.enable_explain,
+            enable_explain=not args.disable_explain,
             shap_bg_samples=args.shap_bg_samples,
             shap_explain_samples=args.shap_explain_samples,
             explain_sample_index=args.explain_sample_index,
