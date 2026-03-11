@@ -4,12 +4,14 @@ import os
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
 import torch
 import torch.nn as nn
+from matplotlib import font_manager as fm
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.preprocessing import StandardScaler
 from torch.utils.data import DataLoader, Dataset
@@ -24,6 +26,18 @@ try:
     import shap
 except Exception:  # pragma: no cover - optional dependency
     shap = None
+
+
+# Prefer an installed CJK font to avoid "Glyph missing" warnings on Chinese labels.
+_FONT_CANDIDATES = ["Microsoft YaHei", "Microsoft YaHei UI", "SimHei", "Noto Sans CJK SC", "Source Han Sans SC"]
+_INSTALLED_FONTS = {f.name for f in fm.fontManager.ttflist}
+_CHOSEN_FONT = next((name for name in _FONT_CANDIDATES if name in _INSTALLED_FONTS), None)
+if _CHOSEN_FONT is not None:
+    mpl.rcParams["font.family"] = [_CHOSEN_FONT]
+    mpl.rcParams["font.sans-serif"] = [_CHOSEN_FONT]
+else:
+    mpl.rcParams["font.sans-serif"] = _FONT_CANDIDATES
+mpl.rcParams["axes.unicode_minus"] = False
 
 
 WELLS = [
