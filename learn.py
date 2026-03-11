@@ -20,6 +20,11 @@ try:
 except Exception:  # pragma: no cover - optional dependency
     stft = None
 
+try:
+    import shap
+except Exception:  # pragma: no cover - optional dependency
+    shap = None
+
 
 WELLS = [
     ("岩溶水_每周数据.csv", "岩溶水"),
@@ -92,31 +97,64 @@ class PositionalEncoding(nn.Module):
         return x + self.pe[:, : x.size(1)]
 
 
-class TransformerRegressor(nn.Module):
-    def __init__(self, n_features: int, d_model: int, heads: int, layers: int, dropout: float):
+class ExplainableTransformerEncoderLayer(nn.Module):
+    def __init__(self, d_model: int, heads: int, dropout: float):
         super().__init__()
-        # 先将输入特征投影到模型维度，再用自注意力编码。
-        self.input_proj = nn.Linear(n_features, d_model)
-        self.pos = PositionalEncoding(d_model)
-        encoder_layer = nn.TransformerEncoderLayer(
-            d_model=d_model,
-            nhead=heads,
-            dim_feedforward=d_model * 4,
+        self.self_attn = nn.MultiheadAttention(
+            embed_dim=d_model,
+            num_heads=heads,
             dropout=dropout,
             batch_first=True,
         )
-        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=layers)
+        self.linear1 = nn.Linear(d_model, d_model * 4)
+        self.dropout = nn.Dropout(dropout)
+        self.linear2 = nn.Linear(d_model * 4, d_model)
+        self.dropout1 = nn.Dropout(dropout)
+        self.dropout2 = nn.Dropout(dropout)
+        self.norm1 = nn.LayerNorm(d_model)
+        self.norm2 = nn.LayerNorm(d_model)
+        self.activation = nn.GELU()
+
+    def forward(self, src: torch.Tensor, need_weights: bool = False) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        attn_out, attn_weights = self.self_attn(
+            src,
+            src,
+            src,
+            need_weights=need_weights,
+            average_attn_weights=False,
+        )
+        src = self.norm1(src + self.dropout1(attn_out))
+        ff = self.linear2(self.dropout(self.activation(self.linear1(src))))
+        src = self.norm2(src + self.dropout2(ff))
+        return src, attn_weights if need_weights else None
+
+
+class TransformerRegressor(nn.Module):
+    def __init__(self, n_features: int, d_model: int, heads: int, layers: int, dropout: float):
+        super().__init__()
+        # ???????????????????????????????????
+        self.input_proj = nn.Linear(n_features, d_model)
+        self.pos = PositionalEncoding(d_model)
+        self.layers = nn.ModuleList(
+            [ExplainableTransformerEncoderLayer(d_model=d_model, heads=heads, dropout=dropout) for _ in range(layers)]
+        )
         self.head = nn.Sequential(
             nn.Dropout(dropout),
             nn.Linear(d_model, 1),
         )
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, return_attention: bool = False):
         x = self.input_proj(x)
         x = self.pos(x)
-        x = self.encoder(x)
-        x = x[:, -1, :]
-        return self.head(x).squeeze(-1)
+        attn_last = None
+        for layer in self.layers:
+            x, attn = layer(x, need_weights=return_attention)
+            if return_attention:
+                attn_last = attn
+        out = self.head(x[:, -1, :]).squeeze(-1)
+        if return_attention:
+            return out, attn_last
+        return out
 
 
 class TCNBlock(nn.Module):
@@ -358,14 +396,12 @@ def compute_weighted_conformal_intervals(
     gamma: float,
     lambda_t: float,
     tau: float,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+) -> Tuple[np.ndarray, np.ndarray]:
     gamma = float(np.clip(gamma, 0.0, 1.0))
     tau2 = max(float(tau) ** 2, 1e-12)
     calib_dates = pd.to_datetime(calib_dates)
     target_dates = pd.to_datetime(target_dates)
 
-    pi90_l = np.zeros(len(yhat))
-    pi90_u = np.zeros(len(yhat))
     pi95_l = np.zeros(len(yhat))
     pi95_u = np.zeros(len(yhat))
 
@@ -397,15 +433,12 @@ def compute_weighted_conformal_intervals(
         else:
             w_mix = w_mix / w_mix_sum
 
-        q90 = weighted_quantile(calib_scores, 0.90, w_mix)
         q95 = weighted_quantile(calib_scores, 0.95, w_mix)
 
-        pi90_l[j] = yhat[j] - q90
-        pi90_u[j] = yhat[j] + q90
         pi95_l[j] = yhat[j] - q95
         pi95_u[j] = yhat[j] + q95
 
-    return pi90_l, pi90_u, pi95_l, pi95_u
+    return pi95_l, pi95_u
 
 
 def interval_metrics(y_true: np.ndarray, lower: np.ndarray, upper: np.ndarray) -> Tuple[float, float]:
@@ -435,7 +468,6 @@ def plot_predictions(
     actual: np.ndarray,
     preds: Dict[str, np.ndarray],
     out_path: str,
-    pi90: Optional[Tuple[np.ndarray, np.ndarray]] = None,
     pi95: Optional[Tuple[np.ndarray, np.ndarray]] = None,
 ) -> None:
     plt.figure(figsize=(12, 4))
@@ -444,8 +476,6 @@ def plot_predictions(
         plt.plot(dates, pred, label=name)
     if pi95 is not None:
         plt.fill_between(dates, pi95[0], pi95[1], color="#8A2BE2", alpha=0.15, label="PI95")
-    if pi90 is not None:
-        plt.fill_between(dates, pi90[0], pi90[1], color="#8A2BE2", alpha=0.30, label="PI90")
     plt.legend()
     plt.title("Test Predictions")
     plt.tight_layout()
@@ -458,7 +488,6 @@ def plot_stacking(
     actual: np.ndarray,
     pred: np.ndarray,
     out_path: str,
-    pi90: Optional[Tuple[np.ndarray, np.ndarray]] = None,
     pi95: Optional[Tuple[np.ndarray, np.ndarray]] = None,
 ) -> None:
     plt.figure(figsize=(12, 4))
@@ -466,8 +495,6 @@ def plot_stacking(
     plt.plot(dates, pred, label="Stacking", color="#8A2BE2")
     if pi95 is not None:
         plt.fill_between(dates, pi95[0], pi95[1], color="#8A2BE2", alpha=0.15, label="PI95")
-    if pi90 is not None:
-        plt.fill_between(dates, pi90[0], pi90[1], color="#8A2BE2", alpha=0.30, label="PI90")
     plt.title("Residual Stacking Prediction")
     plt.xlabel("Date")
     plt.ylabel("GWL")
@@ -494,7 +521,6 @@ def plot_future_forecast(
     future_dates: np.ndarray,
     future_values: np.ndarray,
     out_path: str,
-    pi90: Optional[Tuple[np.ndarray, np.ndarray]] = None,
     pi95: Optional[Tuple[np.ndarray, np.ndarray]] = None,
 ) -> None:
     plt.figure(figsize=(12, 4))
@@ -502,8 +528,6 @@ def plot_future_forecast(
     plt.plot(future_dates, future_values, label="Future", color="#00CED1")
     if pi95 is not None:
         plt.fill_between(future_dates, pi95[0], pi95[1], color="#00CED1", alpha=0.15, label="Future PI95")
-    if pi90 is not None:
-        plt.fill_between(future_dates, pi90[0], pi90[1], color="#00CED1", alpha=0.30, label="Future PI90")
     plt.title("Rolling Forecast")
     plt.xlabel("Date")
     plt.ylabel("GWL")
@@ -511,6 +535,228 @@ def plot_future_forecast(
     plt.tight_layout()
     plt.savefig(out_path, dpi=150)
     plt.close()
+
+
+def _build_sequence_feature_names(feature_names: List[str], lookback: int) -> List[str]:
+    names = []
+    for step in range(lookback):
+        lag = lookback - 1 - step
+        for feat in feature_names:
+            names.append(f"t-{lag}_{feat}")
+    return names
+
+
+def _save_force_plot_html(
+    shap_values,
+    sample_idx: int,
+    out_html_path: str,
+    out_fallback_png: str,
+    max_display: int,
+    feature_names_override: Optional[List[str]] = None,
+) -> None:
+    try:
+        sv = shap_values[sample_idx]
+        vals = np.asarray(sv.values)
+        while vals.ndim > 1:
+            vals = vals[..., 0]
+        vals = vals.reshape(-1).astype(float)
+
+        base_vals = np.asarray(sv.base_values)
+        base = float(base_vals.reshape(-1)[0]) if base_vals.size else 0.0
+
+        features = None
+        if getattr(sv, "data", None) is not None:
+            data_arr = np.asarray(sv.data)
+            while data_arr.ndim > 1:
+                data_arr = data_arr[..., 0]
+            features = data_arr.reshape(-1).astype(float).tolist()
+
+        names = feature_names_override if feature_names_override is not None else getattr(sv, "feature_names", None)
+        force_obj = shap.force_plot(base, vals.tolist(), features=features, feature_names=names, matplotlib=False)
+        shap.save_html(out_html_path, force_obj, full_html=True)
+    except Exception as e:
+        with open(out_html_path.replace(".html", "_skipped.txt"), "w", encoding="utf-8") as f:
+            f.write(f"Failed to save force plot HTML: {e}\n")
+        plt.figure(figsize=(8, 4))
+        shap.plots.waterfall(shap_values[sample_idx], max_display=max_display, show=False)
+        plt.tight_layout()
+        plt.savefig(out_fallback_png, dpi=150)
+        plt.close()
+
+
+def _to_explanation(values, data: np.ndarray, feature_names: List[str], base_value: float):
+    if shap is None:
+        return None
+    if isinstance(values, shap.Explanation):
+        return values
+    base_values = np.full(shape=(data.shape[0],), fill_value=float(base_value), dtype=float)
+    return shap.Explanation(values=np.asarray(values), base_values=base_values, data=data, feature_names=feature_names)
+
+
+def explain_transformer_with_shap(
+    transformer: TransformerRegressor,
+    X_background: np.ndarray,
+    X_explain: np.ndarray,
+    feature_names: List[str],
+    out_dir: str,
+    device: torch.device,
+    shap_bg_samples: int,
+    shap_explain_samples: int,
+    explain_sample_index: int,
+    seed: int,
+) -> None:
+    if shap is None:
+        with open(os.path.join(out_dir, "explain_skipped.txt"), "w", encoding="utf-8") as f:
+            f.write("shap is not installed. Install shap to enable explainability outputs.\n")
+        return
+
+    skip_marker = os.path.join(out_dir, "explain_skipped.txt")
+    if os.path.exists(skip_marker):
+        os.remove(skip_marker)
+
+    if len(X_background) == 0 or len(X_explain) == 0:
+        return
+
+    rng = np.random.default_rng(seed)
+    bg_n = min(shap_bg_samples, len(X_background))
+    ex_n = min(shap_explain_samples, len(X_explain))
+    bg_idx = rng.choice(len(X_background), size=bg_n, replace=False)
+    ex_idx = rng.choice(len(X_explain), size=ex_n, replace=False)
+
+    X_bg_seq = X_background[bg_idx]
+    X_ex_seq = X_explain[ex_idx]
+    lookback = X_ex_seq.shape[1]
+    n_features = X_ex_seq.shape[2]
+
+    X_bg_flat = X_bg_seq.reshape(bg_n, lookback * n_features)
+    X_ex_flat = X_ex_seq.reshape(ex_n, lookback * n_features)
+    flat_feature_names = _build_sequence_feature_names(feature_names, lookback)
+
+    transformer.eval()
+
+    def predict_flat(x_flat: np.ndarray) -> np.ndarray:
+        x_seq = x_flat.reshape(-1, lookback, n_features).astype(np.float32)
+        x_tensor = torch.tensor(x_seq, dtype=torch.float32, device=device)
+        with torch.inference_mode():
+            pred = transformer(x_tensor)
+        return pred.detach().cpu().numpy().reshape(-1)
+
+    masker = shap.maskers.Independent(X_bg_flat, max_samples=min(100, len(X_bg_flat)))
+    explainer = shap.Explainer(predict_flat, masker, feature_names=flat_feature_names)
+    shap_values_raw = explainer(X_ex_flat)
+
+    if isinstance(shap_values_raw, shap.Explanation):
+        shap_values = shap_values_raw
+    else:
+        expected = explainer.expected_value
+        if isinstance(expected, (list, tuple, np.ndarray)):
+            expected = np.asarray(expected).reshape(-1)[0]
+        shap_values = _to_explanation(shap_values_raw, X_ex_flat, flat_feature_names, float(expected))
+
+    plt.figure(figsize=(10, 4))
+    shap.plots.beeswarm(shap_values, max_display=min(20, len(flat_feature_names)), show=False)
+    plt.tight_layout()
+    plt.savefig(os.path.join(out_dir, "transformer_shap_beeswarm.png"), dpi=150)
+    plt.close()
+
+    target_idx = int(np.clip(explain_sample_index, 0, ex_n - 1))
+    sv_one = shap_values.values[target_idx].reshape(lookback, n_features)
+
+    plt.figure(figsize=(7, 4))
+    sns.heatmap(
+        sv_one,
+        cmap="coolwarm",
+        center=0.0,
+        xticklabels=feature_names,
+        yticklabels=[f"t-{lookback - 1 - i}" for i in range(lookback)],
+    )
+    plt.title("Transformer SHAP (time x feature)")
+    plt.tight_layout()
+    plt.savefig(os.path.join(out_dir, "transformer_shap_heatmap_sample.png"), dpi=150)
+    plt.close()
+
+    _save_force_plot_html(
+        shap_values=shap_values,
+        sample_idx=target_idx,
+        out_html_path=os.path.join(out_dir, "transformer_shap_force_sample.html"),
+        out_fallback_png=os.path.join(out_dir, "transformer_shap_waterfall_sample.png"),
+        max_display=min(20, len(flat_feature_names)),
+        feature_names_override=flat_feature_names,
+    )
+
+    x_one = torch.tensor(X_ex_seq[target_idx : target_idx + 1], dtype=torch.float32, device=device)
+    with torch.inference_mode():
+        _, attn = transformer(x_one, return_attention=True)
+
+    if attn is not None:
+        attn_np = attn.detach().cpu().numpy()[0]
+        attn_avg = attn_np.mean(axis=0)
+
+        plt.figure(figsize=(6, 5))
+        sns.heatmap(
+            attn_avg,
+            cmap="magma",
+            xticklabels=[f"t-{lookback - 1 - i}" for i in range(lookback)],
+            yticklabels=[f"t-{lookback - 1 - i}" for i in range(lookback)],
+        )
+        plt.title("Transformer Attention (last layer, heads avg)")
+        plt.xlabel("Key time step")
+        plt.ylabel("Query time step")
+        plt.tight_layout()
+        plt.savefig(os.path.join(out_dir, "transformer_attention_heatmap_sample.png"), dpi=150)
+        plt.close()
+
+        attn_last = attn_avg[-1]
+        step_shap = np.abs(sv_one).sum(axis=1)
+        attn_last = attn_last / (attn_last.sum() + 1e-12)
+        step_shap = step_shap / (step_shap.sum() + 1e-12)
+
+        plt.figure(figsize=(8, 3))
+        plt.plot(attn_last, label="attention(last query)")
+        plt.plot(step_shap, label="sum(|SHAP|) per time step")
+        plt.xlabel("time step index")
+        plt.ylabel("normalized score")
+        plt.title("Attention vs SHAP (time-step level)")
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(os.path.join(out_dir, "transformer_attention_vs_shap_overlay.png"), dpi=150)
+        plt.close()
+
+
+def explain_stacking_with_shap(
+    xgb: XGBRegressor,
+    stack_features: np.ndarray,
+    out_dir: str,
+) -> None:
+    if shap is None or len(stack_features) == 0:
+        return
+
+    names = ["Pred_LSTM", "Pred_Transformer", "Pred_TCN"]
+    explainer = shap.TreeExplainer(xgb)
+    shap_values_raw = explainer(stack_features)
+
+    if isinstance(shap_values_raw, shap.Explanation):
+        shap_values = shap_values_raw
+    else:
+        expected = explainer.expected_value
+        if isinstance(expected, (list, tuple, np.ndarray)):
+            expected = np.asarray(expected).reshape(-1)[0]
+        shap_values = _to_explanation(shap_values_raw, stack_features, names, float(expected))
+
+    plt.figure(figsize=(7, 4))
+    shap.plots.beeswarm(shap_values, max_display=3, show=False)
+    plt.tight_layout()
+    plt.savefig(os.path.join(out_dir, "stacking_xgb_shap_beeswarm.png"), dpi=150)
+    plt.close()
+
+    _save_force_plot_html(
+        shap_values=shap_values,
+        sample_idx=0,
+        out_html_path=os.path.join(out_dir, "stacking_xgb_shap_force_sample.html"),
+        out_fallback_png=os.path.join(out_dir, "stacking_xgb_shap_waterfall_sample.png"),
+        max_display=3,
+        feature_names_override=names,
+    )
 
 
 def run_well(
@@ -530,6 +776,11 @@ def run_well(
     future_steps: int,
     gamma: float,
     lambda_t: float,
+    enable_explain: bool,
+    shap_bg_samples: int,
+    shap_explain_samples: int,
+    explain_sample_index: int,
+    seed: int,
 ) -> Tuple[pd.DataFrame, Dict[str, Dict[str, float]]]:
     # 单口井完整流程：训练、集成、共形区间与可视化输出。
     df = load_data(file_path)
@@ -626,7 +877,7 @@ def run_well(
     z_test_raw = np.column_stack([pred_test_lstm_orig, pred_test_trans_orig, pred_test_tcn_orig])
     z_test_std = (z_test_raw - z_mu) / z_std
 
-    pi90_l_test, pi90_u_test, pi95_l_test, pi95_u_test = compute_weighted_conformal_intervals(
+    pi95_l_test, pi95_u_test = compute_weighted_conformal_intervals(
         yhat=pred_test_stack_orig,
         z_target_std=z_test_std,
         target_dates=split.dates_test,
@@ -638,7 +889,6 @@ def run_well(
         tau=tau_init,
     )
 
-    picp90, mpiw90 = interval_metrics(y_test_orig, pi90_l_test, pi90_u_test)
     picp95, mpiw95 = interval_metrics(y_test_orig, pi95_l_test, pi95_u_test)
 
     metrics_map = {
@@ -647,9 +897,7 @@ def run_well(
         "TCN": metrics(y_test_orig, pred_test_tcn_orig),
         "Stacking": {
             **metrics(y_test_orig, pred_test_stack_orig),
-            "PICP90": picp90,
             "PICP95": picp95,
-            "MPIW90": mpiw90,
             "MPIW95": mpiw95,
             "TAU_INIT": tau_init,
         },
@@ -664,8 +912,6 @@ def run_well(
             "Transformer": pred_test_trans_orig,
             "TCN": pred_test_tcn_orig,
             "Stacking": pred_test_stack_orig,
-            "PI90_Lower": pi90_l_test,
-            "PI90_Upper": pi90_u_test,
             "PI95_Lower": pi95_l_test,
             "PI95_Upper": pi95_u_test,
             "Aquifer": aquifer,
@@ -683,7 +929,6 @@ def run_well(
             "Stacking": pred_test_stack_orig,
         },
         os.path.join(out_dir, "test_predictions.png"),
-        pi90=(pi90_l_test, pi90_u_test),
         pi95=(pi95_l_test, pi95_u_test),
     )
 
@@ -692,7 +937,6 @@ def run_well(
         y_test_orig,
         pred_test_stack_orig,
         os.path.join(out_dir, "stacking_predictions.png"),
-        pi90=(pi90_l_test, pi90_u_test),
         pi95=(pi95_l_test, pi95_u_test),
     )
 
@@ -736,7 +980,7 @@ def run_well(
     z_future_raw = np.column_stack([future_lstm_orig, future_trans_orig, future_tcn_orig])
     z_future_std = (z_future_raw - z_mu) / z_std
 
-    pi90_l_future, pi90_u_future, pi95_l_future, pi95_u_future = compute_weighted_conformal_intervals(
+    pi95_l_future, pi95_u_future = compute_weighted_conformal_intervals(
         yhat=future_preds_orig,
         z_target_std=z_future_std,
         target_dates=future_dates.values,
@@ -752,8 +996,6 @@ def run_well(
         {
             "Date": future_dates.values,
             "Future_Stacking": future_preds_orig,
-            "PI90_Lower": pi90_l_future,
-            "PI90_Upper": pi90_u_future,
             "PI95_Lower": pi95_l_future,
             "PI95_Upper": pi95_u_future,
             "Aquifer": aquifer,
@@ -767,9 +1009,29 @@ def run_well(
         future_dates.values,
         future_preds_orig,
         os.path.join(out_dir, "future_forecast.png"),
-        pi90=(pi90_l_future, pi90_u_future),
         pi95=(pi95_l_future, pi95_u_future),
     )
+
+    if enable_explain:
+        explain_dir = os.path.join(out_dir, "explain")
+        os.makedirs(explain_dir, exist_ok=True)
+        explain_transformer_with_shap(
+            transformer=transformer,
+            X_background=split.X_train,
+            X_explain=split.X_test,
+            feature_names=features,
+            out_dir=explain_dir,
+            device=device,
+            shap_bg_samples=shap_bg_samples,
+            shap_explain_samples=shap_explain_samples,
+            explain_sample_index=explain_sample_index,
+            seed=seed,
+        )
+        explain_stacking_with_shap(
+            xgb=xgb,
+            stack_features=stack_test_X,
+            out_dir=explain_dir,
+        )
 
     return pred_df, metrics_map
 
@@ -818,6 +1080,10 @@ def main() -> None:
     parser.add_argument("--future_steps", type=int, default=30)
     parser.add_argument("--gamma", type=float, default=0.5)
     parser.add_argument("--lambda_t", type=float, default=0.02)
+    parser.add_argument("--enable_explain", action="store_true")
+    parser.add_argument("--shap_bg_samples", type=int, default=80)
+    parser.add_argument("--shap_explain_samples", type=int, default=40)
+    parser.add_argument("--explain_sample_index", type=int, default=0)
     args = parser.parse_args()
 
     ratio_sum = args.train_ratio + args.val_ratio + args.calib_ratio
@@ -850,6 +1116,11 @@ def main() -> None:
             future_steps=args.future_steps,
             gamma=args.gamma,
             lambda_t=args.lambda_t,
+            enable_explain=args.enable_explain,
+            shap_bg_samples=args.shap_bg_samples,
+            shap_explain_samples=args.shap_explain_samples,
+            explain_sample_index=args.explain_sample_index,
+            seed=args.seed,
         )
         all_metrics[well_id] = metrics_map
 
