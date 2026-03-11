@@ -28,7 +28,7 @@ except Exception:  # pragma: no cover - optional dependency
     shap = None
 
 
-# Prefer an installed CJK font to avoid "Glyph missing" warnings on Chinese labels.
+# 优先选择系统已安装的中文字体，避免图表中文标签显示为方框。
 _FONT_CANDIDATES = ["Microsoft YaHei", "Microsoft YaHei UI", "SimHei", "Noto Sans CJK SC", "Source Han Sans SC"]
 _INSTALLED_FONTS = {f.name for f in fm.fontManager.ttflist}
 _CHOSEN_FONT = next((name for name in _FONT_CANDIDATES if name in _INSTALLED_FONTS), None)
@@ -146,7 +146,7 @@ class ExplainableTransformerEncoderLayer(nn.Module):
 class TransformerRegressor(nn.Module):
     def __init__(self, n_features: int, d_model: int, heads: int, layers: int, dropout: float):
         super().__init__()
-        # ???????????????????????????????????
+        # 先将输入特征映射到 d_model 维度，再经过多层自注意力编码，最后用末时刻表示回归。
         self.input_proj = nn.Linear(n_features, d_model)
         self.pos = PositionalEncoding(d_model)
         self.layers = nn.ModuleList(
@@ -568,7 +568,7 @@ def _save_force_plot_html(
     max_display: int,
     feature_names_override: Optional[List[str]] = None,
 ) -> None:
-    # In this project we prefer a stable static artifact over fragile force-HTML export.
+    # 本项目优先输出稳定的静态图（waterfall PNG），不依赖易失败的 force-HTML。
     plt.figure(figsize=(8, 4))
     shap.plots.waterfall(shap_values[sample_idx], max_display=max_display, show=False)
     plt.tight_layout()

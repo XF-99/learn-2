@@ -1,86 +1,132 @@
-# 数据最晚的3口井 - 合并的每周数据
+# 地下水位预测与可解释性分析（3口井周尺度数据）
 
-## 选定的3口井
+本项目使用 `LSTM + Transformer + TCN + XGBoost Stacking` 进行地下水位（`GWL`）预测，并输出：
+- 点预测结果
+- 95% 置信区间（加权 conformal）
+- 注意力可视化（默认开启）
+- SHAP 可解释图（环境安装 `shap` 时自动开启）
 
+## 1. 数据文件
 
-### 井 1: 岩溶水
-- **所属州**: BB
-- **时间范围**: 2000-01-03 至 2018-06-04
-- **数据点数**: 962 周
-- **时间跨度**: 6727 天 (18.4 年)
-
-### 井 2: 孔隙水
-- **所属州**: SH
-- **时间范围**: 2000-01-03 至 2018-06-04
-- **数据点数**: 962 周
-- **时间跨度**: 6727 天 (18.4 年)
-
-### 井 3: 裂隙水
-- **所属州**: BB
-- **时间范围**: 2000-01-03 至 2018-05-21
-- **数据点数**: 960 周
-- **时间跨度**: 6713 天 (18.4 年)
-
-## 数据文件
-
-每口井一个CSV文件,包含5列:
-
-- **Date**: 地下水位采样日期
-- **TASMAX**: 该周最高温度平均值(°C)
-- **TAS**: 该周平均温度平均值(°C)
-- **Precipitation**: 该周降水量总和(mm)
-- **GWL**: 地下水位(m)
-
-## 文件列表
-
+目录下默认使用以下 3 个 CSV：
 - `岩溶水_每周数据.csv`
 - `孔隙水_每周数据.csv`
 - `裂隙水_每周数据.csv`
 
-## 数据说明
+字段约定：
+- `Date`
+- `GWL`
+- `TASMAX`
+- `TAS`
+- `Precipitation`
 
-### 聚合方法
-- **温度**: 每周7天的加权平均(算术平均)
-- **降水**: 每周7天的总和
-- **地下水位**: 每周采样值
+## 2. 模型与流程
 
-### 时间对齐
-以地下水位采样日期为基准,气象数据为该日期往前7天的聚合值。
+主脚本：`learn.py`
 
-### 数据完整性
-- 所有数据无缺失值
-- 时间序列连续
-- 每周包含完整的7天气象数据
+核心流程：
+1. 按时间排序并构造滑动窗口序列（`lookback/horizon`）
+2. 按时间切分 `train/val/calib/test`
+3. 训练 LSTM、Transformer、TCN 三个基模型
+4. 用 XGBoost 学习 stacking 残差修正
+5. 使用 calibration 集做加权 conformal，输出 **95% 区间**
+6. 输出测试集与未来滚动预测图/表
+7. 解释输出：
+   - attention：默认生成
+   - SHAP：检测到 `shap` 后自动生成
 
-## 使用示例
+## 3. 运行方式
 
-```python
-import pandas as pd
+默认运行（会生成预测图、95%区间、attention；若已安装 shap 则额外生成 SHAP）：
 
-# 读取数据
-df = pd.read_csv('岩溶水_每周数据.csv')
-df['Date'] = pd.to_datetime(df['Date'])
-
-# 查看数据
-print(df.head())
-print(df.info())
-
-# 特征和目标
-X = df[['TASMAX', 'TAS', 'Precipitation']]
-y = df['GWL']
+```bash
+python learn.py
 ```
 
-## 数据来源
+快速烟雾测试（低成本）：
 
-- **地下水数据**: GEMS-GER项目
-- **气象数据**: HYRAS v6.0, 德国气象局(DWD)
-- **处理日期**: 2026年1月17日
+```bash
+python learn.py --epochs 1 --patience 1 --future_steps 2
+```
 
+关闭解释输出：
 
-## Weighted conformal intervals (Stacking only)
+```bash
+python learn.py --disable_explain
+```
 
-- The pipeline now uses a time-ordered split: `train/val/calib/test = 60/10/15/15`.
-- Conformal scores are computed on the independent calibration block: `s_i = |y_i - yhat_i|`.
-- Intervals are produced for both test and future forecasts at 90% and 95%.
-- Reported interval metrics: `PICP90`, `PICP95`, `MPIW90`, `MPIW95`.
-- Future rolling intervals are conditioned on the script's assumption about future exogenous feature handling (same assumption used by the point forecast rollout).
+常用参数：
+- `--lookback` 默认 `12`
+- `--horizon` 默认 `1`
+- `--train_ratio` 默认 `0.6`
+- `--val_ratio` 默认 `0.1`
+- `--calib_ratio` 默认 `0.15`
+- `--future_steps` 默认 `30`
+- `--out_dir` 默认 `outputs`
+
+## 4. 输出目录结构
+
+默认输出到 `outputs/`，每口井一个子目录：
+
+```text
+outputs/
+  metrics_summary.csv
+  metrics_summary.json
+  rmse_comparison.png
+  nse_comparison.png
+  岩溶水/
+    predictions.csv
+    future_predictions.csv
+    test_predictions.png
+    stacking_predictions.png
+    future_forecast.png
+    explain/
+      transformer_attention_heatmap_sample.png
+      transformer_shap_beeswarm.png
+      transformer_shap_heatmap_sample.png
+      transformer_shap_waterfall_sample.png
+      stacking_xgb_shap_beeswarm.png
+      stacking_xgb_shap_waterfall_sample.png
+  孔隙水/
+  裂隙水/
+```
+
+说明：
+- 预测 CSV 中仅保留 `PI95_Lower/PI95_Upper`
+- 指标中仅保留 95% 区间相关指标（如 `PICP95`、`MPIW95`）
+
+## 5. 环境依赖
+
+基础依赖：
+- `numpy`
+- `pandas`
+- `matplotlib`
+- `seaborn`
+- `scikit-learn`
+- `torch`
+- `xgboost`
+- `scipy`（用于 STFT，可选）
+
+可解释性增强：
+- `shap`（安装后自动输出 SHAP 图）
+
+安装示例：
+
+```bash
+pip install numpy pandas matplotlib seaborn scikit-learn torch xgboost scipy shap
+```
+
+## 6. 常见问题
+
+### Q1：图里中文显示成方框
+代码已内置中文字体自动检测并设置。若系统缺少中文字体，请安装以下任一字体：
+- Microsoft YaHei
+- SimHei
+- Noto Sans CJK SC
+
+### Q2：为什么没有 SHAP 图
+请确认运行环境安装了 `shap`，并且未使用 `--disable_explain`。
+
+### Q3：为什么看到 `PermutationExplainer` 进度
+这是 SHAP 解释过程的正常输出，不影响结果。
+
