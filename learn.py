@@ -1,8 +1,9 @@
+﻿# -*- coding: utf-8 -*-
 import argparse
 import json
 import os
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -18,8 +19,9 @@ from torch.utils.data import DataLoader, Dataset
 from xgboost import XGBRegressor
 
 try:
-    from scipy.signal import stft
+    from scipy.signal import find_peaks, stft
 except Exception:  # pragma: no cover - optional dependency
+    find_peaks = None
     stft = None
 
 try:
@@ -28,7 +30,7 @@ except Exception:  # pragma: no cover - optional dependency
     shap = None
 
 
-# 优先选择系统已安装的中文字体，避免图表中文标签显示为方框。
+# 优先选择系统已安装的中文字体，避免图表中文显示异常。
 _FONT_CANDIDATES = ["Microsoft YaHei", "Microsoft YaHei UI", "SimHei", "Noto Sans CJK SC", "Source Han Sans SC"]
 _INSTALLED_FONTS = {f.name for f in fm.fontManager.ttflist}
 _CHOSEN_FONT = next((name for name in _FONT_CANDIDATES if name in _INSTALLED_FONTS), None)
@@ -40,13 +42,26 @@ else:
 mpl.rcParams["axes.unicode_minus"] = False
 
 
-WELLS = [
-    ("岩溶水_每周数据.csv", "岩溶水"),
-    ("孔隙水_每周数据.csv", "孔隙水"),
-    ("裂隙水_每周数据.csv", "裂隙水"),
-]
+WELLS = []
+for _name in sorted(os.listdir(".")):
+    if (not _name.lower().endswith(".csv")) or (not os.path.isfile(_name)):
+        continue
+    _base = os.path.splitext(_name)[0]
+    # Keep only source datasets and avoid output summary CSVs becoming pseudo-wells.
+    if any(k in _base.lower() for k in ["metrics_summary", "predictions", "future_predictions", "peak_metrics"]):
+        continue
+    _aquifer = _base
+    for token in ["_每周数据", "每周数据", "_weekly_data", "weekly_data"]:
+        _aquifer = _aquifer.replace(token, "")
+    _aquifer = _aquifer.rstrip("_- ")
+    WELLS.append((_name, _aquifer))
 
-
+PEAK_MODEL_COLUMNS = {
+    "lstm": "LSTM",
+    "transformer": "Transformer",
+    "tcn": "TCN",
+    "stacking": "Stacking",
+}
 @dataclass
 class SplitData:
     X_train: np.ndarray
@@ -77,7 +92,7 @@ class SequenceDataset(Dataset):
 class LSTMRegressor(nn.Module):
     def __init__(self, n_features: int, hidden: int, layers: int, dropout: float):
         super().__init__()
-        # 多层 LSTM 编码序列，并使用最后一个时间步的表示做回归。
+        # 多层 LSTM 编码时序信号，并使用最后时间步做回归。
         self.lstm = nn.LSTM(
             input_size=n_features,
             hidden_size=hidden,
@@ -99,7 +114,7 @@ class LSTMRegressor(nn.Module):
 class PositionalEncoding(nn.Module):
     def __init__(self, d_model: int, max_len: int = 5000):
         super().__init__()
-        # Transformer 使用固定的正弦位置编码。
+        # Transformer 使用固定正弦位置编码。
         position = torch.arange(max_len).unsqueeze(1)
         div_term = torch.exp(torch.arange(0, d_model, 2) * (-np.log(10000.0) / d_model))
         pe = torch.zeros(max_len, d_model)
@@ -146,7 +161,7 @@ class ExplainableTransformerEncoderLayer(nn.Module):
 class TransformerRegressor(nn.Module):
     def __init__(self, n_features: int, d_model: int, heads: int, layers: int, dropout: float):
         super().__init__()
-        # 先将输入特征映射到 d_model 维度，再经过多层自注意力编码，最后用末时刻表示回归。
+        # 先映射到 d_model，再经多层自注意力编码，最后用末时刻表示回归。
         self.input_proj = nn.Linear(n_features, d_model)
         self.pos = PositionalEncoding(d_model)
         self.layers = nn.ModuleList(
@@ -174,7 +189,7 @@ class TransformerRegressor(nn.Module):
 class TCNBlock(nn.Module):
     def __init__(self, in_ch: int, out_ch: int, kernel: int, dilation: int, dropout: float):
         super().__init__()
-        # 空洞卷积用于扩大时间感受野。
+        # TCN 空洞卷积用于扩大时间感受野。
         padding = (kernel - 1) * dilation
         self.conv = nn.Conv1d(in_ch, out_ch, kernel, padding=padding, dilation=dilation)
         self.relu = nn.ReLU()
@@ -245,7 +260,7 @@ def prepare_splits(
     val_ratio: float,
     calib_ratio: float,
 ) -> SplitData:
-    # 按时间顺序切分：train/val/calib/test。
+    # 按时间顺序切分 train/val/calib/test。
     data = df[features].values
     if train_ratio + val_ratio + calib_ratio >= 1:
         raise ValueError("train_ratio + val_ratio + calib_ratio must be less than 1.0")
@@ -369,7 +384,7 @@ def metrics(y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, float]:
 
 
 def inverse_target(scaler: StandardScaler, y_scaled: np.ndarray, n_features: int) -> np.ndarray:
-    # 仅对目标列（第 0 列）做反标准化。
+    # 仅对目标列（第0列）做反标准化。
     zeros = np.zeros((len(y_scaled), n_features))
     zeros[:, 0] = y_scaled
     return scaler.inverse_transform(zeros)[:, 0]
@@ -464,7 +479,7 @@ def interval_metrics(y_true: np.ndarray, lower: np.ndarray, upper: np.ndarray) -
 def make_time_frequency_plot(series: pd.Series, out_path: str) -> None:
     if stft is None:
         return
-    # 使用 STFT 可视化时频特征。
+    # 使用 STFT 可视化时间-频率特征。
     f, t, Z = stft(series.values, fs=1.0, nperseg=52)
     plt.figure(figsize=(10, 4))
     plt.pcolormesh(t, f, np.abs(Z), shading="auto")
@@ -568,7 +583,7 @@ def _save_force_plot_html(
     max_display: int,
     feature_names_override: Optional[List[str]] = None,
 ) -> None:
-    # 本项目优先输出稳定的静态图（waterfall PNG），不依赖易失败的 force-HTML。
+    # 优先输出稳定的静态 waterfall PNG，避免 force-HTML 在部分环境失败。
     plt.figure(figsize=(8, 4))
     shap.plots.waterfall(shap_values[sample_idx], max_display=max_display, show=False)
     plt.tight_layout()
@@ -748,6 +763,352 @@ def explain_stacking_with_shap(
     )
 
 
+
+def _resolve_peak_tolerance(length: int, peak_tolerance: Optional[int]) -> int:
+    if peak_tolerance is not None and peak_tolerance > 0:
+        return int(peak_tolerance)
+    return int(np.clip(max(1, length // 30), 3, 5))
+
+
+def detect_peaks_adaptive(
+    series: np.ndarray,
+    prominence_scale: Optional[float] = None,
+    distance_min: Optional[int] = None,
+) -> Tuple[np.ndarray, Dict[str, np.ndarray], Dict[str, float]]:
+    values = np.asarray(series, dtype=float)
+    if find_peaks is None or len(values) < 3:
+        return np.array([], dtype=int), {}, {"prominence": 0.0, "distance": 1.0}
+
+    std_val = float(np.nanstd(values))
+    q75, q25 = np.nanpercentile(values, [75, 25])
+    iqr_val = float(q75 - q25)
+    span = float(np.nanmax(values) - np.nanmin(values))
+
+    base_scale = max(std_val, iqr_val / 1.349, 1e-8)
+    scale = float(prominence_scale) if prominence_scale is not None else 0.8
+    lower_bound = max(0.05 * span, 1e-6)
+    prominence = max(scale * base_scale, lower_bound)
+
+    auto_distance = max(1, len(values) // 20)
+    min_distance = int(distance_min) if distance_min is not None else 1
+    distance = max(min_distance, auto_distance)
+
+    peaks, properties = find_peaks(values, prominence=prominence, distance=distance)
+    return peaks.astype(int), properties, {"prominence": float(prominence), "distance": float(distance)}
+
+
+def match_peaks_with_tolerance(
+    true_peaks: np.ndarray,
+    pred_peaks: np.ndarray,
+    tolerance: int,
+) -> Tuple[List[Tuple[int, int]], int, int, int]:
+    true_arr = np.asarray(true_peaks, dtype=int)
+    pred_arr = np.asarray(pred_peaks, dtype=int)
+    used_pred: set[int] = set()
+    matched_pairs: List[Tuple[int, int]] = []
+
+    for t_idx in true_arr:
+        candidates = []
+        for p_idx in pred_arr:
+            if p_idx in used_pred:
+                continue
+            gap = abs(int(t_idx) - int(p_idx))
+            if gap <= tolerance:
+                candidates.append((gap, int(p_idx)))
+        if not candidates:
+            continue
+        candidates.sort(key=lambda x: x[0])
+        best_pred = candidates[0][1]
+        used_pred.add(best_pred)
+        matched_pairs.append((int(t_idx), int(best_pred)))
+
+    tp = len(matched_pairs)
+    fp = int(len(pred_arr) - tp)
+    fn = int(len(true_arr) - tp)
+    return matched_pairs, tp, fp, fn
+
+
+def calc_peak_metrics(
+    true_series: np.ndarray,
+    pred_series: np.ndarray,
+    true_peaks: np.ndarray,
+    pred_peaks: np.ndarray,
+    matched_pairs: List[Tuple[int, int]],
+    tp: int,
+    fp: int,
+    fn: int,
+) -> Dict[str, float]:
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+    recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+    f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
+    detection_rate = tp / len(true_peaks) if len(true_peaks) > 0 else 0.0
+
+    amp_errors = []
+    amp_relative_errors = []
+    timing_errors = []
+    for t_idx, p_idx in matched_pairs:
+        true_amp = float(true_series[t_idx])
+        pred_amp = float(pred_series[p_idx])
+        abs_err = abs(true_amp - pred_amp)
+        amp_errors.append(abs_err)
+        if abs(true_amp) > 1e-8:
+            amp_relative_errors.append(abs_err / abs(true_amp))
+        timing_errors.append(abs(t_idx - p_idx))
+
+    amplitude_mae = float(np.mean(amp_errors)) if amp_errors else np.nan
+    amplitude_rmse = float(np.sqrt(np.mean(np.square(amp_errors)))) if amp_errors else np.nan
+    amplitude_mape = float(np.mean(amp_relative_errors) * 100) if amp_relative_errors else np.nan
+    max_amplitude_error = float(np.max(amp_errors)) if amp_errors else np.nan
+
+    mean_timing_error = float(np.mean(timing_errors)) if timing_errors else np.nan
+    std_timing_error = float(np.std(timing_errors)) if timing_errors else np.nan
+    max_timing_error = float(np.max(timing_errors)) if timing_errors else np.nan
+
+    amplitude_score = 1.0 / (1.0 + amplitude_mape / 100.0) if np.isfinite(amplitude_mape) else 0.0
+    timing_score = 1.0 / (1.0 + mean_timing_error) if np.isfinite(mean_timing_error) else 0.0
+    composite_score = 0.5 * f1 + 0.3 * amplitude_score + 0.2 * timing_score
+
+    return {
+        "true_peak_count": int(len(true_peaks)),
+        "pred_peak_count": int(len(pred_peaks)),
+        "tp": int(tp),
+        "fp": int(fp),
+        "fn": int(fn),
+        "precision": float(precision),
+        "recall": float(recall),
+        "f1": float(f1),
+        "detection_rate": float(detection_rate),
+        "amplitude_mae": amplitude_mae,
+        "amplitude_rmse": amplitude_rmse,
+        "amplitude_mape": amplitude_mape,
+        "max_amplitude_error": max_amplitude_error,
+        "mean_timing_error": mean_timing_error,
+        "std_timing_error": std_timing_error,
+        "max_timing_error": max_timing_error,
+        "composite_score": float(composite_score),
+    }
+
+
+def evaluate_peak_for_models(
+    pred_df: pd.DataFrame,
+    well: str,
+    model_columns: List[str],
+    peak_tolerance: Optional[int],
+    peak_prominence_scale: Optional[float],
+    peak_distance_min: Optional[int],
+) -> Tuple[pd.DataFrame, Dict[str, Dict[str, Any]]]:
+    true_series = pred_df["Actual"].to_numpy(dtype=float)
+    true_peaks, _, true_params = detect_peaks_adaptive(
+        true_series,
+        prominence_scale=peak_prominence_scale,
+        distance_min=peak_distance_min,
+    )
+    tolerance = _resolve_peak_tolerance(len(true_series), peak_tolerance)
+
+    rows = []
+    details: Dict[str, Dict[str, Any]] = {}
+    for model in model_columns:
+        pred_series = pred_df[model].to_numpy(dtype=float)
+        pred_peaks, _, pred_params = detect_peaks_adaptive(
+            pred_series,
+            prominence_scale=peak_prominence_scale,
+            distance_min=peak_distance_min,
+        )
+        matched_pairs, tp, fp, fn = match_peaks_with_tolerance(true_peaks, pred_peaks, tolerance=tolerance)
+        metric_map = calc_peak_metrics(
+            true_series=true_series,
+            pred_series=pred_series,
+            true_peaks=true_peaks,
+            pred_peaks=pred_peaks,
+            matched_pairs=matched_pairs,
+            tp=tp,
+            fp=fp,
+            fn=fn,
+        )
+        row = {"well": well, "model": model}
+        row.update(metric_map)
+        rows.append(row)
+
+        amplitude_errors = [abs(float(true_series[t]) - float(pred_series[p])) for t, p in matched_pairs]
+        details[model] = {
+            "true_peaks": true_peaks,
+            "pred_peaks": pred_peaks,
+            "matched_pairs": matched_pairs,
+            "amplitude_errors": amplitude_errors,
+            "true_params": true_params,
+            "pred_params": pred_params,
+            "tolerance": tolerance,
+        }
+
+    columns = [
+        "well",
+        "model",
+        "true_peak_count",
+        "pred_peak_count",
+        "tp",
+        "fp",
+        "fn",
+        "precision",
+        "recall",
+        "f1",
+        "detection_rate",
+        "amplitude_mae",
+        "amplitude_rmse",
+        "amplitude_mape",
+        "max_amplitude_error",
+        "mean_timing_error",
+        "std_timing_error",
+        "max_timing_error",
+        "composite_score",
+    ]
+    result_df = pd.DataFrame(rows)
+    if len(result_df) == 0:
+        result_df = pd.DataFrame(columns=columns)
+    else:
+        result_df = result_df[columns]
+    return result_df, details
+
+
+def plot_peak_detection(
+    dates: np.ndarray,
+    actual: np.ndarray,
+    pred: np.ndarray,
+    true_peaks: np.ndarray,
+    pred_peaks: np.ndarray,
+    matched_pairs: List[Tuple[int, int]],
+    model_name: str,
+    out_path: str,
+) -> None:
+    plt.figure(figsize=(12, 4))
+    plt.plot(dates, actual, label="Actual", color="black", linewidth=1.8)
+    plt.plot(dates, pred, label=model_name, color="#1f77b4", linewidth=1.4, alpha=0.9)
+
+    if len(true_peaks) > 0:
+        plt.scatter(dates[true_peaks], actual[true_peaks], color="#2ca02c", marker="o", s=40, label="Actual Peaks")
+    if len(pred_peaks) > 0:
+        plt.scatter(dates[pred_peaks], pred[pred_peaks], color="#d62728", marker="x", s=45, label="Pred Peaks")
+
+    for t_idx, p_idx in matched_pairs:
+        plt.plot([dates[t_idx], dates[p_idx]], [actual[t_idx], pred[p_idx]], color="gray", alpha=0.35, linestyle="--")
+
+    plt.title(f"Peak Detection - {model_name}")
+    plt.xlabel("Date")
+    plt.ylabel("GWL")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=150)
+    plt.close()
+
+
+def plot_peak_radar_compare(peak_df: pd.DataFrame, out_path: str) -> None:
+    labels = ["Precision", "Recall", "F1", "Detection Rate", "Amplitude Accuracy", "Timing Accuracy"]
+    angles = np.linspace(0, 2 * np.pi, len(labels), endpoint=False).tolist()
+    angles += angles[:1]
+
+    plt.figure(figsize=(7, 7))
+    ax = plt.subplot(111, polar=True)
+    for _, row in peak_df.iterrows():
+        amp_score = 1.0 / (1.0 + row["amplitude_mape"] / 100.0) if np.isfinite(row["amplitude_mape"]) else 0.0
+        timing_score = 1.0 / (1.0 + row["mean_timing_error"]) if np.isfinite(row["mean_timing_error"]) else 0.0
+        vals = [
+            float(row["precision"]),
+            float(row["recall"]),
+            float(row["f1"]),
+            float(row["detection_rate"]),
+            float(amp_score),
+            float(timing_score),
+        ]
+        vals += vals[:1]
+        ax.plot(angles, vals, linewidth=1.8, label=row["model"])
+        ax.fill(angles, vals, alpha=0.08)
+
+    ax.set_thetagrids(np.degrees(angles[:-1]), labels)
+    ax.set_ylim(0, 1)
+    ax.set_title("Peak Capability Radar")
+    ax.grid(True, alpha=0.4)
+    ax.legend(loc="upper right", bbox_to_anchor=(1.25, 1.15))
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=150)
+    plt.close()
+
+
+def plot_peak_amplitude_error_boxplot(amplitude_errors: Dict[str, List[float]], out_path: str) -> None:
+    rows = []
+    for model_name, errs in amplitude_errors.items():
+        for err in errs:
+            rows.append({"model": model_name, "amplitude_error": float(err)})
+
+    plt.figure(figsize=(9, 4))
+    if rows:
+        err_df = pd.DataFrame(rows)
+        sns.boxplot(data=err_df, x="model", y="amplitude_error", color="#87CEEB")
+        sns.stripplot(data=err_df, x="model", y="amplitude_error", color="gray", alpha=0.4, jitter=0.25, size=3)
+        plt.ylabel("Absolute Amplitude Error")
+    else:
+        plt.text(0.5, 0.5, "No matched peak pairs for amplitude errors", ha="center", va="center")
+        plt.xticks([])
+        plt.yticks([])
+    plt.title("Peak Amplitude Error Distribution")
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=150)
+    plt.close()
+
+
+def plot_future_peak_display(
+    history_dates: np.ndarray,
+    history_values: np.ndarray,
+    future_dates: np.ndarray,
+    future_values: np.ndarray,
+    out_path: str,
+    peak_prominence_scale: Optional[float],
+    peak_distance_min: Optional[int],
+    history_tail: int = 52,
+) -> None:
+    future_values = np.asarray(future_values, dtype=float)
+    future_peaks, _, _ = detect_peaks_adaptive(
+        future_values,
+        prominence_scale=peak_prominence_scale,
+        distance_min=peak_distance_min,
+    )
+
+    tail_n = min(history_tail, len(history_values))
+    plt.figure(figsize=(12, 4))
+    plt.plot(history_dates[-tail_n:], history_values[-tail_n:], label="History (tail)", color="#FF6347")
+    plt.plot(future_dates, future_values, label="Future Stacking", color="#00CED1")
+    if len(future_peaks) > 0:
+        plt.scatter(
+            future_dates[future_peaks],
+            future_values[future_peaks],
+            marker="x",
+            color="#d62728",
+            s=48,
+            label="Future Peaks",
+        )
+    plt.title("Future Peak Display (No Evaluation)")
+    plt.xlabel("Date")
+    plt.ylabel("GWL")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=150)
+    plt.close()
+
+
+def summarize_peak_metrics(out_dir: str) -> None:
+    peak_frames: List[pd.DataFrame] = []
+    for item in sorted(os.listdir(out_dir)):
+        well_dir = os.path.join(out_dir, item)
+        if not os.path.isdir(well_dir):
+            continue
+        peak_path = os.path.join(well_dir, "peak", "peak_metrics.csv")
+        if os.path.exists(peak_path):
+            peak_frames.append(pd.read_csv(peak_path))
+
+    if not peak_frames:
+        return
+
+    merged = pd.concat(peak_frames, ignore_index=True)
+    merged.to_csv(os.path.join(out_dir, "peak_metrics_summary.csv"), index=False)
+
 def run_well(
     file_path: str,
     aquifer: str,
@@ -770,8 +1131,13 @@ def run_well(
     shap_explain_samples: int,
     explain_sample_index: int,
     seed: int,
+    enable_peak_analysis: bool,
+    peak_tolerance: Optional[int],
+    peak_prominence_scale: Optional[float],
+    peak_distance_min: Optional[int],
+    peak_plot_models: List[str],
 ) -> Tuple[pd.DataFrame, Dict[str, Dict[str, float]]]:
-    # 单口井完整流程：训练、集成、共形区间与可视化输出。
+    # 单井完整流程：数据切分、模型训练、集成预测、区间估计与结果落盘。
     df = load_data(file_path)
     features = ["GWL", "TASMAX", "TAS", "Precipitation"]
     target = "GWL"
@@ -810,7 +1176,7 @@ def run_well(
     pred_val_trans = predict(transformer, split.X_val, device)
     pred_val_tcn = predict(tcn, split.X_val, device)
 
-    # Stacking 元模型学习对基模型预测的残差修正。
+    # 使用 XGBoost 对基模型残差做二次学习（stacking）。
     xgb = XGBRegressor(
         n_estimators=300,
         max_depth=4,
@@ -893,6 +1259,8 @@ def run_well(
     }
 
     os.makedirs(out_dir, exist_ok=True)
+    peak_dir = os.path.join(out_dir, "peak")
+    os.makedirs(peak_dir, exist_ok=True)
     pred_df = pd.DataFrame(
         {
             "Date": split.dates_test,
@@ -907,6 +1275,49 @@ def run_well(
         }
     )
     pred_df.to_csv(os.path.join(out_dir, "predictions.csv"), index=False)
+
+    if enable_peak_analysis and find_peaks is not None:
+        eval_model_columns = ["LSTM", "Transformer", "TCN", "Stacking"]
+        peak_df, peak_details = evaluate_peak_for_models(
+            pred_df=pred_df,
+            well=aquifer,
+            model_columns=eval_model_columns,
+            peak_tolerance=peak_tolerance,
+            peak_prominence_scale=peak_prominence_scale,
+            peak_distance_min=peak_distance_min,
+        )
+        peak_df.to_csv(os.path.join(peak_dir, "peak_metrics.csv"), index=False)
+
+        selected_keys = [k.strip().lower() for k in peak_plot_models if k.strip()]
+        if not selected_keys:
+            selected_keys = list(PEAK_MODEL_COLUMNS.keys())
+        selected_columns = [PEAK_MODEL_COLUMNS[k] for k in selected_keys if k in PEAK_MODEL_COLUMNS]
+        if not selected_columns:
+            selected_columns = eval_model_columns
+
+        for model_name in selected_columns:
+            details = peak_details.get(model_name)
+            if details is None:
+                continue
+            plot_peak_detection(
+                dates=pred_df["Date"].to_numpy(),
+                actual=pred_df["Actual"].to_numpy(dtype=float),
+                pred=pred_df[model_name].to_numpy(dtype=float),
+                true_peaks=np.asarray(details["true_peaks"], dtype=int),
+                pred_peaks=np.asarray(details["pred_peaks"], dtype=int),
+                matched_pairs=details["matched_pairs"],
+                model_name=model_name,
+                out_path=os.path.join(peak_dir, f"peak_detection_{model_name.lower()}.png"),
+            )
+
+        plot_peak_radar_compare(peak_df=peak_df, out_path=os.path.join(peak_dir, "peak_radar_compare.png"))
+        amp_map = {model: peak_details[model]["amplitude_errors"] for model in selected_columns if model in peak_details}
+        plot_peak_amplitude_error_boxplot(
+            amplitude_errors=amp_map,
+            out_path=os.path.join(peak_dir, "peak_amplitude_error_boxplot.png"),
+        )
+    elif enable_peak_analysis:
+        print("[Peak] scipy.signal.find_peaks is unavailable; peak analysis skipped.")
 
     plot_predictions(
         split.dates_test,
@@ -942,7 +1353,7 @@ def run_well(
     future_trans_orig = []
     future_tcn_orig = []
 
-    # 从最后一个可用窗口开始进行滚动未来预测。
+    # 滚动未来预测：每步将上一时刻预测回填到序列末端。
     for _ in range(future_steps):
         seq_t = torch.tensor(last_seq[np.newaxis, :, :], dtype=torch.float32).to(device)
         lstm_p = lstm(seq_t).detach().cpu().numpy().reshape(-1)
@@ -1001,6 +1412,17 @@ def run_well(
         pi95=(pi95_l_future, pi95_u_future),
     )
 
+
+    if enable_peak_analysis and find_peaks is not None:
+        plot_future_peak_display(
+            history_dates=df["Date"].values,
+            history_values=df["GWL"].values,
+            future_dates=future_dates.values,
+            future_values=future_preds_orig,
+            out_path=os.path.join(peak_dir, "future_peak_display.png"),
+            peak_prominence_scale=peak_prominence_scale,
+            peak_distance_min=peak_distance_min,
+        )
     if enable_explain:
         explain_dir = os.path.join(out_dir, "explain")
         os.makedirs(explain_dir, exist_ok=True)
@@ -1036,7 +1458,6 @@ def run_well(
 
 
 def summarize_metrics(all_metrics: Dict[str, Dict[str, Dict[str, float]]], out_dir: str) -> None:
-    # 汇总各井各模型指标并导出对比结果。
     rows = []
     for well_id, model_metrics in all_metrics.items():
         for model_name, metric_values in model_metrics.items():
@@ -1046,7 +1467,6 @@ def summarize_metrics(all_metrics: Dict[str, Dict[str, Dict[str, float]]], out_d
     df = pd.DataFrame(rows)
     df.to_csv(os.path.join(out_dir, "metrics_summary.csv"), index=False)
 
-    # 快速生成跨井对比图。
     plt.figure(figsize=(10, 4))
     sns.barplot(data=df, x="model", y="RMSE", hue="well")
     plt.title("RMSE by Model and Well")
@@ -1063,7 +1483,7 @@ def summarize_metrics(all_metrics: Dict[str, Dict[str, Dict[str, float]]], out_d
 
 
 def main() -> None:
-    # 程序入口：解析参数并逐井运行。
+    # 绋嬪簭鍏ュ彛锛氳В鏋愬弬鏁板苟閫愪簳杩愯銆?
     parser = argparse.ArgumentParser()
     parser.add_argument("--lookback", type=int, default=12)
     parser.add_argument("--horizon", type=int, default=1)
@@ -1080,6 +1500,13 @@ def main() -> None:
     parser.add_argument("--gamma", type=float, default=0.5)
     parser.add_argument("--lambda_t", type=float, default=0.02)
     parser.add_argument("--disable_explain", action="store_true")
+    parser.set_defaults(enable_peak_analysis=True)
+    parser.add_argument("--enable_peak_analysis", dest="enable_peak_analysis", action="store_true")
+    parser.add_argument("--disable_peak_analysis", dest="enable_peak_analysis", action="store_false")
+    parser.add_argument("--peak_tolerance", type=int, default=None)
+    parser.add_argument("--peak_prominence_scale", type=float, default=None)
+    parser.add_argument("--peak_distance_min", type=int, default=1)
+    parser.add_argument("--peak_plot_models", type=str, default="lstm,transformer,tcn,stacking")
     parser.add_argument("--shap_bg_samples", type=int, default=80)
     parser.add_argument("--shap_explain_samples", type=int, default=40)
     parser.add_argument("--explain_sample_index", type=int, default=0)
@@ -1093,6 +1520,7 @@ def main() -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     all_metrics: Dict[str, Dict[str, Dict[str, float]]] = {}
+    peak_plot_models = [m.strip().lower() for m in args.peak_plot_models.split(",") if m.strip()]
     os.makedirs(args.out_dir, exist_ok=True)
 
     for file_path, aquifer in WELLS:
@@ -1120,13 +1548,29 @@ def main() -> None:
             shap_explain_samples=args.shap_explain_samples,
             explain_sample_index=args.explain_sample_index,
             seed=args.seed,
+            enable_peak_analysis=args.enable_peak_analysis,
+            peak_tolerance=args.peak_tolerance,
+            peak_prominence_scale=args.peak_prominence_scale,
+            peak_distance_min=args.peak_distance_min,
+            peak_plot_models=peak_plot_models,
         )
         all_metrics[well_id] = metrics_map
 
     summarize_metrics(all_metrics, args.out_dir)
+    summarize_peak_metrics(args.out_dir)
     with open(os.path.join(args.out_dir, "metrics_summary.json"), "w", encoding="utf-8") as f:
         json.dump(all_metrics, f, indent=2)
 
 
 if __name__ == "__main__":
     main()
+
+
+
+
+
+
+
+
+
+
