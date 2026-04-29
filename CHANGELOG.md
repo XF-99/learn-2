@@ -1,5 +1,19 @@
 ﻿# 更新记录
 
+## 2026-04-29 - Dropout 实验结果更新
+
+本次使用新的三口代表井每周数据重新运行了 dropout 参数敏感性实验，并用新生成的 `outputs_dropout/` 整体替换了仓库中的旧结果。
+
+### 更新内容
+
+- 删除旧的 `outputs_dropout/` 结果目录后，重新同步本次运行生成的完整 dropout 结果。
+- 覆盖更新 `dropout_0.0` 到 `dropout_0.5` 各组实验输出、逐井预测结果、对比图和汇总表。
+- 更新 `dropout_sweep_metrics.csv`、`dropout_sweep_summary.csv`、`dropout_rmse_comparison.png`、`dropout_nse_comparison.png`。
+
+### 新结果概览
+
+新的汇总结果显示，不同模型的最佳平均 RMSE 分布在不同 dropout 设置上：Transformer 在 `dropout=0.3` 下最低，LSTM 和 Stacking 在 `dropout=0.4` 下表现较好，TCN 在 `dropout=0.3` 下表现较好。后续分析应以本次 2026-04-29 重新运行的输出为准。
+
 ## 2026-04-19 - Dropout 泛化性能实验
 
 本次更新新增了一个独立的 dropout 参数敏感性实验，并上传了已经跑完的实验结果，方便之后检查不同 dropout 取值对模型泛化性能的影响。
@@ -21,3 +35,5 @@
 
 - `ec68052 Add dropout sweep experiment results`：上传 dropout 实验脚本和实验结果。
 - `134dfad Document dropout experiment update`：首次添加英文版更新说明。
+
+
