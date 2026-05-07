@@ -65,3 +65,18 @@
 - `134dfad Document dropout experiment update`：首次添加英文版更新说明。
 
 
+## 2026-05-08 - 最优 lookback/dropout 主实验结果更新
+
+本次根据参数实验结果更新主训练脚本参数，并重新运行 `learn.py` 覆盖 `outputs/` 主实验结果。
+
+### 更新内容
+
+- 将 `learn.py` 默认 `lookback` 从 `12` 调整为 `44`。
+- 将 LSTM、Transformer、TCN 的 dropout 统一从 `0.2` 调整为 `0.3`。
+- 数据切分比例保持 learn-2 原设置不变：`train_ratio=0.6`、`val_ratio=0.1`、`calib_ratio=0.15`。
+- 重新生成 `outputs/` 下三类含水层的预测结果、未来预测、峰值分析、解释性分析图表和汇总文件。
+- 本次只更新主实验结果，不重跑 `outputs_dropout/` 或 `outputs_lookback_sweep/`。
+
+### 新结果概览
+
+`outputs/metrics_summary.csv`、`outputs/metrics_summary.json` 和 `outputs/peak_metrics_summary.csv` 已随本次运行更新。三类含水层子目录各生成 21 个结果文件，主实验完成时间为 2026-05-08 00:21 左右。

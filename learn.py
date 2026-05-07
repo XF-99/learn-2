@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 import argparse
 import json
 import os
@@ -1164,9 +1164,9 @@ def run_well(
         shuffle=False,
     )
 
-    lstm = LSTMRegressor(n_features=len(features), hidden=64, layers=2, dropout=0.2)
-    transformer = TransformerRegressor(n_features=len(features), d_model=64, heads=4, layers=2, dropout=0.2)
-    tcn = TCNRegressor(n_features=len(features), channels=[32, 32, 32], kernel=3, dropout=0.2)
+    lstm = LSTMRegressor(n_features=len(features), hidden=64, layers=2, dropout=0.3)
+    transformer = TransformerRegressor(n_features=len(features), d_model=64, heads=4, layers=2, dropout=0.3)
+    tcn = TCNRegressor(n_features=len(features), channels=[32, 32, 32], kernel=3, dropout=0.3)
 
     lstm = train_model(lstm, train_loader, val_loader, device, epochs, lr, patience)
     transformer = train_model(transformer, train_loader, val_loader, device, epochs, lr, patience)
@@ -1485,7 +1485,7 @@ def summarize_metrics(all_metrics: Dict[str, Dict[str, Dict[str, float]]], out_d
 def main() -> None:
     # 绋嬪簭鍏ュ彛锛氳В鏋愬弬鏁板苟閫愪簳杩愯銆?
     parser = argparse.ArgumentParser()
-    parser.add_argument("--lookback", type=int, default=12)
+    parser.add_argument("--lookback", type=int, default=44)
     parser.add_argument("--horizon", type=int, default=1)
     parser.add_argument("--train_ratio", type=float, default=0.6)
     parser.add_argument("--val_ratio", type=float, default=0.1)
@@ -1561,9 +1561,10 @@ def main() -> None:
     with open(os.path.join(args.out_dir, "metrics_summary.json"), "w", encoding="utf-8") as f:
         json.dump(all_metrics, f, indent=2)
 
-
 if __name__ == "__main__":
     main()
+
+
 
 
 
