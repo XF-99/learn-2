@@ -1,0 +1,18 @@
+{
+  "selection_model": "Stacking",
+  "primary_metric": "NSE_mean",
+  "primary_rule": "maximize",
+  "tie_break_metric": "RMSE_mean",
+  "tie_break_rule": "minimize",
+  "best_lookback": 44,
+  "best_metrics": {
+    "MAE_mean": 0.13841928319654861,
+    "MAE_std": 0.15884259837684445,
+    "RMSE_mean": 0.18547824840753083,
+    "RMSE_std": 0.2081067540239091,
+    "R2_mean": 0.972919689099748,
+    "R2_std": 0.01601308124015584,
+    "NSE_mean": 0.972919689099748,
+    "NSE_std": 0.01601308124015584
+  }
+}

@@ -1,5 +1,19 @@
 ﻿# 更新记录
 
+## 2026-05-07 - Lookback 参数实验结果更新
+
+本次新增并运行 lookback_experiment.py，用于在不修改 learn.py 的前提下批量扫描 lookback 参数，并同步完整实验结果到 outputs_lookback_sweep/。
+
+### 更新内容
+
+- 新增 lookback_experiment.py：统一运行 lookback 参数实验，默认扫描 12,18,26,32,38,44,50。
+- 新增 outputs_lookback_sweep/：包含每个 lookback 的逐井预测结果、对比图、残差图、未来预测图和汇总指标。
+- 新增汇总文件：lookback_sweep_metrics.csv、lookback_sweep_summary.csv、best_lookback.json、lookback_nse_comparison.png、lookback_rmse_comparison.png。
+
+### 新结果概览
+
+按最终融合模型 Stacking 的三口井平均 NSE_mean 最大作为主排序标准，并以 RMSE_mean 最小作为辅助判断，本次实验得到最优 lookback 为 44。对应 NSE_mean=0.972919689099748，RMSE_mean=0.18547824840753083。
+
 ## 2026-04-29 - 每周数据与主结果重新生成
 
 本次使用新的三份每周数据集替换仓库中的原始数据，并重新运行 `learn.py` 生成主实验结果。旧的 `outputs/` 结果已由本次运行结果覆盖，旧的 `outputs_dropout/` dropout 扫描结果已删除，避免继续保留与当前数据集不一致的历史输出。
