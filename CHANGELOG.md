@@ -1,81 +1,88 @@
-# 更新记录
+# Changelog
 
-## 2026-05-08 - 最优 lookback/dropout 主实验结果更新
+## 2026-05-15 - Replace Project With 9-Well Strict Holdout Forecasting Run
 
-本次根据参数实验结果更新主训练脚本参数，并重新运行 `learn.py` 覆盖 `outputs/` 主实验结果。
+### Changed
 
-### 更新内容
+- Replaced the previous 3-type output set with a 9-well dataset: 3 wells for 裂隙水, 3 wells for 岩溶水, and 3 wells for 孔隙水.
+- Aligned all 9 wells to the same weekly span: `1969-01-13` to `2016-01-18`.
+- Updated the model input features to use all available weekly variables:
+  - `GWL`
+  - `TASMAX`
+  - `TAS`
+  - `TASMIN`
+  - `Humidity`
+  - `Precipitation`
+- Reworked the evaluation split to the stricter order:
+  - `train -> val -> selection -> calib -> test -> future_holdout`
+- Reserved the final 30 weeks as `future_holdout`.
+- Kept `selection` only for hyperparameter selection and `calib` only for interval calibration.
+- Updated `future_holdout` forecasting to use recursive GWL predictions while still using the true future weather variables.
+- Updated persistence baseline behavior:
+  - `test`: previous week's true GWL.
+  - `future_holdout`: recursive constant baseline from the last pre-holdout true GWL.
+- Added aquifer-type averaging so the three wells of each type are averaged for final cross-type comparison.
 
-- 将 `learn.py` 默认 `lookback` 从 `12` 调整为 `44`。
-- 将 LSTM、Transformer、TCN 的 dropout 统一从 `0.2` 调整为 `0.3`。
-- 数据切分比例保持 learn-2 原设置不变：`train_ratio=0.6`、`val_ratio=0.1`、`calib_ratio=0.15`。
-- 重新生成 `outputs/` 下三类含水层的预测结果、未来预测、峰值分析、解释性分析图表和汇总文件。
-- 本次只更新主实验结果，不重跑 `outputs_dropout/` 或 `outputs_lookback_sweep/`。
+### Hyperparameters
 
-### 新结果概览
+- Re-ran lookback experiments with `batch_size=128`.
+- Selected `lookback=18`.
+- Re-ran dropout experiments with `lookback=18` and `batch_size=128`.
+- Selected `dropout=0.4`.
+- Updated `learn.py` defaults to:
+  - `lookback=18`
+  - `dropout=0.4`
+  - `batch_size=128`
 
-`outputs/metrics_summary.csv`、`outputs/metrics_summary.json` 和 `outputs/peak_metrics_summary.csv` 已随本次运行更新。三类含水层子目录各生成 21 个结果文件，主实验完成时间为 2026-05-08 00:21 左右。
+### Added
 
-## 2026-05-07 - Lookback 参数实验结果更新
+- `prepare_nine_well_common_data.py` for building the 9-well common-span dataset.
+- `prepare_selected_weekly_data.py` and `validate_selected_weekly_data.py` for selected-well data preparation and validation.
+- `test_learn_data_flow.py` for strict split, scaler, future holdout, and baseline checks.
+- `selected_weekly_data/` with the first selected 3-well dataset.
+- `selected_weekly_data_9wells_common/` with the final 9-well common-span dataset.
+- `outputs_9wells_lookback/` with the new lookback sweep results.
+- `outputs_9wells_dropout/` with the new dropout sweep results.
 
-本次新增并运行 lookback_experiment.py，用于在不修改 learn.py 的前提下批量扫描 lookback 参数，并同步完整实验结果到 outputs_lookback_sweep/。
+### Outputs
 
-### 更新内容
+- Replaced `outputs/` with the final 9-well full run.
+- The final full run includes:
+  - `metrics_summary.csv`
+  - `metrics_summary.json`
+  - `metrics_by_type_summary.csv`
+  - `rmse_comparison.png`
+  - `nse_comparison.png`
+  - `peak_metrics_summary.csv`
+  - per-well test and future-holdout predictions
+  - conformal 95% interval columns
+  - SHAP and Transformer attention figures
+  - peak analysis figures and metrics
 
-- 新增 lookback_experiment.py：统一运行 lookback 参数实验，默认扫描 12,18,26,32,38,44,50。
-- 新增 outputs_lookback_sweep/：包含每个 lookback 的逐井预测结果、对比图、残差图、未来预测图和汇总指标。
-- 新增汇总文件：lookback_sweep_metrics.csv、lookback_sweep_summary.csv、best_lookback.json、lookback_nse_comparison.png、lookback_rmse_comparison.png。
+### Validation
 
-### 新结果概览
+- `python -m py_compile learn.py`
+- Final full run:
 
-按最终融合模型 Stacking 的三口井平均 NSE_mean 最大作为主排序标准，并以 RMSE_mean 最小作为辅助判断，本次实验得到最优 lookback 为 44。对应 NSE_mean=0.972919689099748，RMSE_mean=0.18547824840753083。
+```powershell
+python learn.py --out_dir outputs_final_9wells_full
+```
 
-## 2026-04-29 - 每周数据与主结果重新生成
+- Final output check confirmed:
+  - 9 well directories.
+  - no missing expected output files.
+  - every `future_holdout_predictions.csv` has exactly 30 rows.
+  - `metrics_summary.csv` has 90 rows.
+  - `metrics_by_type_summary.csv` has 30 rows.
+  - both `test` and `future_holdout` splits contain `Persistence`, `LSTM`, `Transformer`, `TCN`, and `Stacking`.
 
-本次使用新的三份每周数据集替换仓库中的原始数据，并重新运行 `learn.py` 生成主实验结果。旧的 `outputs/` 结果已由本次运行结果覆盖，旧的 `outputs_dropout/` dropout 扫描结果已删除，避免继续保留与当前数据集不一致的历史输出。
+## 2026-05-08 - Previous Lookback/Dropout Experiment Refresh
 
-### 更新内容
+- Earlier version selected lookback/dropout using the previous 3-type setup.
+- This result has been superseded by the 2026-05-15 9-well strict holdout workflow.
 
-- 替换三份每周数据 CSV：孔隙水、裂隙水、岩溶水。
-- 重新同步 `outputs/` 下的主实验结果、预测文件、未来预测、峰值分析图表和解释性分析图表。
-- 删除旧的 `outputs_dropout/` 目录及其 dropout 扫描结果，因为本次只重新运行了主实验。
+## 2026-04-29 - Initial Interval, SHAP, Peak, and Hyperparameter Experiments
 
-### 新结果概览
-
-本次主实验输出包含 3 类水文数据、4 类模型的指标汇总与图表结果。`outputs/metrics_summary.csv`、`outputs/metrics_summary.json` 和 `outputs/peak_metrics_summary.csv` 已随本次结果一起更新，后续分析应以本次 2026-04-29 重新运行生成的 `outputs/` 为准。
-
-## 2026-04-29 - Dropout 实验结果更新
-
-本次使用新的三口代表井每周数据重新运行了 dropout 参数敏感性实验，并用新生成的 `outputs_dropout/` 整体替换了仓库中的旧结果。
-
-### 更新内容
-
-- 删除旧的 `outputs_dropout/` 结果目录后，重新同步本次运行生成的完整 dropout 结果。
-- 覆盖更新 `dropout_0.0` 到 `dropout_0.5` 各组实验输出、逐井预测结果、对比图和汇总表。
-- 更新 `dropout_sweep_metrics.csv`、`dropout_sweep_summary.csv`、`dropout_rmse_comparison.png`、`dropout_nse_comparison.png`。
-
-### 新结果概览
-
-新的汇总结果显示，不同模型的最佳平均 RMSE 分布在不同 dropout 设置上：Transformer 在 `dropout=0.3` 下最低，LSTM 和 Stacking 在 `dropout=0.4` 下表现较好，TCN 在 `dropout=0.3` 下表现较好。后续分析应以本次 2026-04-29 重新运行的输出为准。
-
-## 2026-04-19 - Dropout 泛化性能实验
-
-本次更新新增了一个独立的 dropout 参数敏感性实验，并上传了已经跑完的实验结果，方便之后检查不同 dropout 取值对模型泛化性能的影响。
-
-### 新增内容
-
-- `dropout_experiment.py`：独立实验脚本，不修改原来的 `learn.py`，运行时在内存中调整 LSTM、Transformer、TCN 的 dropout 取值。
-- `outputs_dropout/`：dropout 取值 `0.0`、`0.1`、`0.2`、`0.3`、`0.4`、`0.5` 的完整实验输出。
-- `outputs_dropout/dropout_sweep_metrics.csv`：每个 dropout、每口井、每个模型的详细指标结果。
-- `outputs_dropout/dropout_sweep_summary.csv`：按 dropout 和模型聚合后的均值、标准差结果。
-- `outputs_dropout/dropout_rmse_comparison.png`：不同 dropout 下各模型 RMSE 对比图。
-- `outputs_dropout/dropout_nse_comparison.png`：不同 dropout 下各模型 NSE 对比图。
-
-### 主要结论
-
-三口井的平均结果显示，`dropout=0.0` 在 LSTM、Transformer 和 Stacking 上取得了最好的平均泛化表现。TCN 略有不同：`dropout=0.1` 的平均 RMSE 最低，`dropout=0.2` 的平均 NSE 最高。整体来看，在当前数据规模和模型设置下，较强的 dropout 没有提升泛化性能，反而多数情况下会降低模型表现。
-
-### 对应提交
-
-- `ec68052 Add dropout sweep experiment results`：上传 dropout 实验脚本和实验结果。
-- `134dfad Document dropout experiment update`：首次添加英文版更新说明。
+- Added interval prediction, SHAP/attention interpretation outputs, and peak analysis.
+- Added early lookback and dropout sweep scripts.
+- This result has been superseded by the 2026-05-15 9-well strict holdout workflow.

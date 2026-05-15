@@ -49,13 +49,14 @@ def dropout_dir_name(value: float) -> str:
     return f"dropout_{label}"
 
 
-def metrics_to_rows(all_metrics: Dict[str, Dict[str, Dict[str, float]]]) -> List[Dict[str, Any]]:
+def metrics_to_rows(all_metrics: Dict[str, Dict[str, Dict[str, Dict[str, float]]]]) -> List[Dict[str, Any]]:
     rows = []
-    for well_id, model_metrics in all_metrics.items():
-        for model_name, metric_values in model_metrics.items():
-            row = {"well": well_id, "model": model_name}
-            row.update(metric_values)
-            rows.append(row)
+    for well_id, split_metrics in all_metrics.items():
+        for split_name, model_metrics in split_metrics.items():
+            for model_name, metric_values in model_metrics.items():
+                row = {"split": split_name, "well": well_id, "model": model_name}
+                row.update(metric_values)
+                rows.append(row)
     return rows
 
 
@@ -172,11 +173,11 @@ def run_experiment(
     device: torch.device,
     out_dir: Path,
     dropout: float,
-) -> Dict[str, Dict[str, Dict[str, float]]]:
+) -> Dict[str, Dict[str, Dict[str, Dict[str, float]]]]:
     learn.set_seed(args.seed)
     apply_dropout_override(learn, originals, dropout)
 
-    all_metrics: Dict[str, Dict[str, Dict[str, float]]] = {}
+    all_metrics: Dict[str, Dict[str, Dict[str, Dict[str, float]]]] = {}
     peak_plot_models = [m.strip().lower() for m in args.peak_plot_models.split(",") if m.strip()]
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -192,16 +193,19 @@ def run_experiment(
                 "horizon": args.horizon,
                 "train_ratio": args.train_ratio,
                 "val_ratio": args.val_ratio,
+                "selection_ratio": args.selection_ratio,
                 "calib_ratio": args.calib_ratio,
                 "epochs": args.epochs,
                 "batch_size": args.batch_size,
                 "lr": args.lr,
                 "patience": args.patience,
+                "dropout": dropout,
                 "device": device,
                 "out_dir": str(well_out_dir),
-                "future_steps": args.future_steps,
+                "holdout_steps": args.holdout_steps,
                 "gamma": args.gamma,
                 "lambda_t": args.lambda_t,
+                "enable_intervals": not args.disable_intervals,
                 "enable_explain": not args.disable_explain,
                 "shap_bg_samples": args.shap_bg_samples,
                 "shap_explain_samples": args.shap_explain_samples,
@@ -228,24 +232,61 @@ def run_experiment(
     return all_metrics
 
 
+def flatten_summary_columns(summary: pd.DataFrame) -> pd.DataFrame:
+    summary.columns = ["_".join([part for part in col if part]) for col in summary.columns.to_flat_index()]
+    return summary
+
+
+def choose_best_dropout(summary: pd.DataFrame) -> Dict[str, Any]:
+    if "split" in summary.columns:
+        summary = summary[summary["split"] == "selection"].copy()
+    stacking = summary[summary["model"] == "Stacking"].copy()
+    if stacking.empty:
+        raise ValueError("No Stacking rows found in dropout summary")
+    stacking = stacking.sort_values(
+        by=["NSE_mean", "RMSE_mean", "dropout"],
+        ascending=[False, True, True],
+    )
+    best = stacking.iloc[0].to_dict()
+    return {
+        "selection_model": "Stacking",
+        "selection_split": "selection",
+        "primary_metric": "NSE_mean",
+        "primary_rule": "maximize",
+        "tie_break_metric": "RMSE_mean",
+        "tie_break_rule": "minimize",
+        "best_dropout": float(best["dropout"]),
+        "best_metrics": {
+            key: float(value)
+            for key, value in best.items()
+            if key not in {"dropout", "model", "split"} and pd.notna(value)
+        },
+    }
+
+
 def summarize_dropout_sweep(sweep_rows: List[Dict[str, Any]], out_dir: Path) -> None:
     df = pd.DataFrame(sweep_rows)
-    df.to_csv(out_dir / "dropout_sweep_metrics.csv", index=False)
+    selection_df = df[df["split"] == "selection"].copy()
+    selection_df.to_csv(out_dir / "dropout_sweep_selection_metrics.csv", index=False)
 
     metric_cols = [col for col in ["MAE", "RMSE", "R2", "NSE", "PICP95", "MPIW95", "TAU_INIT"] if col in df.columns]
-    summary = df.groupby(["dropout", "model"], as_index=False)[metric_cols].agg(["mean", "std"])
-    summary.columns = ["_".join([part for part in col if part]) for col in summary.columns.to_flat_index()]
-    summary.to_csv(out_dir / "dropout_sweep_summary.csv", index=False)
+    summary = selection_df.groupby(["split", "dropout", "model"], as_index=False)[metric_cols].agg(["mean", "std"])
+    summary = flatten_summary_columns(summary)
+    summary.to_csv(out_dir / "dropout_sweep_selection_summary.csv", index=False)
+
+    best = choose_best_dropout(summary)
+    with (out_dir / "best_dropout.json").open("w", encoding="utf-8") as f:
+        json.dump(best, f, indent=2)
 
     plt.figure(figsize=(10, 4))
-    sns.lineplot(data=df, x="dropout", y="RMSE", hue="model", marker="o", ci="sd")
+    sns.lineplot(data=selection_df, x="dropout", y="RMSE", hue="model", marker="o", errorbar="sd")
     plt.title("RMSE by Dropout and Model")
     plt.tight_layout()
     plt.savefig(out_dir / "dropout_rmse_comparison.png", dpi=150)
     plt.close()
 
     plt.figure(figsize=(10, 4))
-    sns.lineplot(data=df, x="dropout", y="NSE", hue="model", marker="o", ci="sd")
+    sns.lineplot(data=selection_df, x="dropout", y="NSE", hue="model", marker="o", errorbar="sd")
     plt.title("NSE by Dropout and Model")
     plt.tight_layout()
     plt.savefig(out_dir / "dropout_nse_comparison.png", dpi=150)
@@ -260,6 +301,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--horizon", type=int, default=1)
     parser.add_argument("--train_ratio", type=float, default=0.6)
     parser.add_argument("--val_ratio", type=float, default=0.1)
+    parser.add_argument("--selection_ratio", type=float, default=0.1)
     parser.add_argument("--calib_ratio", type=float, default=0.15)
     parser.add_argument("--epochs", type=int, default=60)
     parser.add_argument("--batch_size", type=int, default=32)
@@ -267,9 +309,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--patience", type=int, default=10)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--out_dir", type=Path, default=Path("outputs_dropout"))
-    parser.add_argument("--future_steps", type=int, default=30)
+    parser.add_argument("--holdout_steps", type=int, default=30)
+    parser.add_argument("--future_steps", type=int, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--gamma", type=float, default=0.5)
     parser.add_argument("--lambda_t", type=float, default=0.02)
+    parser.add_argument("--disable_intervals", action="store_true")
     parser.add_argument("--disable_explain", action="store_true")
     parser.set_defaults(enable_peak_analysis=True)
     parser.add_argument("--enable_peak_analysis", dest="enable_peak_analysis", action="store_true")
@@ -289,9 +333,12 @@ def main() -> None:
     args.source_dir = args.source_dir.resolve()
     args.out_dir = args.out_dir.resolve()
 
-    ratio_sum = args.train_ratio + args.val_ratio + args.calib_ratio
+    if args.future_steps is not None:
+        args.holdout_steps = args.future_steps
+
+    ratio_sum = args.train_ratio + args.val_ratio + args.selection_ratio + args.calib_ratio
     if ratio_sum >= 1.0:
-        raise ValueError("train_ratio + val_ratio + calib_ratio must be less than 1.0")
+        raise ValueError("train_ratio + val_ratio + selection_ratio + calib_ratio must be less than 1.0")
 
     learn = load_learn_module(args.source_dir)
     originals = {

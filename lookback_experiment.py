@@ -43,13 +43,14 @@ def lookback_dir_name(value: int) -> str:
     return f"lookback_{value}"
 
 
-def metrics_to_rows(all_metrics: Dict[str, Dict[str, Dict[str, float]]]) -> List[Dict[str, Any]]:
+def metrics_to_rows(all_metrics: Dict[str, Dict[str, Dict[str, Dict[str, float]]]]) -> List[Dict[str, Any]]:
     rows = []
-    for well_id, model_metrics in all_metrics.items():
-        for model_name, metric_values in model_metrics.items():
-            row = {"well": well_id, "model": model_name}
-            row.update(metric_values)
-            rows.append(row)
+    for well_id, split_metrics in all_metrics.items():
+        for split_name, model_metrics in split_metrics.items():
+            for model_name, metric_values in model_metrics.items():
+                row = {"split": split_name, "well": well_id, "model": model_name}
+                row.update(metric_values)
+                rows.append(row)
     return rows
 
 
@@ -102,13 +103,29 @@ def run_experiment(
                 "horizon": args.horizon,
                 "train_ratio": args.train_ratio,
                 "val_ratio": args.val_ratio,
+                "selection_ratio": args.selection_ratio,
+                "calib_ratio": args.calib_ratio,
                 "epochs": args.epochs,
                 "batch_size": args.batch_size,
                 "lr": args.lr,
                 "patience": args.patience,
+                "dropout": args.dropout,
                 "device": device,
                 "out_dir": str(well_out_dir),
-                "future_steps": args.future_steps,
+                "holdout_steps": args.holdout_steps,
+                "gamma": args.gamma,
+                "lambda_t": args.lambda_t,
+                "enable_intervals": not args.disable_intervals,
+                "enable_explain": not args.disable_explain,
+                "shap_bg_samples": args.shap_bg_samples,
+                "shap_explain_samples": args.shap_explain_samples,
+                "explain_sample_index": args.explain_sample_index,
+                "seed": args.seed,
+                "enable_peak_analysis": args.enable_peak_analysis,
+                "peak_tolerance": args.peak_tolerance,
+                "peak_prominence_scale": args.peak_prominence_scale,
+                "peak_distance_min": args.peak_distance_min,
+                "peak_plot_models": args.peak_plot_models,
             }
             supported = inspect.signature(learn.run_well).parameters
             run_kwargs = {key: value for key, value in run_kwargs.items() if key in supported}
@@ -129,6 +146,8 @@ def flatten_summary_columns(summary: pd.DataFrame) -> pd.DataFrame:
 
 
 def choose_best_lookback(summary: pd.DataFrame) -> Dict[str, Any]:
+    if "split" in summary.columns:
+        summary = summary[summary["split"] == "selection"].copy()
     stacking = summary[summary["model"] == MODEL_FOR_BEST].copy()
     if stacking.empty:
         raise ValueError(f"No {MODEL_FOR_BEST} rows found in lookback summary")
@@ -140,6 +159,7 @@ def choose_best_lookback(summary: pd.DataFrame) -> Dict[str, Any]:
     best = stacking.iloc[0].to_dict()
     return {
         "selection_model": MODEL_FOR_BEST,
+        "selection_split": "selection",
         "primary_metric": "NSE_mean",
         "primary_rule": "maximize",
         "tie_break_metric": "RMSE_mean",
@@ -148,33 +168,34 @@ def choose_best_lookback(summary: pd.DataFrame) -> Dict[str, Any]:
         "best_metrics": {
             key: float(value)
             for key, value in best.items()
-            if key not in {"lookback", "model"} and pd.notna(value)
+            if key not in {"lookback", "model", "split"} and pd.notna(value)
         },
     }
 
 
 def summarize_lookback_sweep(sweep_rows: List[Dict[str, Any]], out_dir: Path) -> None:
     df = pd.DataFrame(sweep_rows)
-    df.to_csv(out_dir / "lookback_sweep_metrics.csv", index=False)
+    selection_df = df[df["split"] == "selection"].copy()
+    selection_df.to_csv(out_dir / "lookback_sweep_selection_metrics.csv", index=False)
 
     metric_cols = [col for col in ["MAE", "RMSE", "R2", "NSE"] if col in df.columns]
-    summary = df.groupby(["lookback", "model"], as_index=False)[metric_cols].agg(["mean", "std"])
+    summary = selection_df.groupby(["split", "lookback", "model"], as_index=False)[metric_cols].agg(["mean", "std"])
     summary = flatten_summary_columns(summary)
-    summary.to_csv(out_dir / "lookback_sweep_summary.csv", index=False)
+    summary.to_csv(out_dir / "lookback_sweep_selection_summary.csv", index=False)
 
     best = choose_best_lookback(summary)
     with (out_dir / "best_lookback.json").open("w", encoding="utf-8") as f:
         json.dump(best, f, indent=2)
 
     plt.figure(figsize=(10, 4))
-    sns.lineplot(data=df, x="lookback", y="NSE", hue="model", marker="o", errorbar="sd")
+    sns.lineplot(data=selection_df, x="lookback", y="NSE", hue="model", marker="o", errorbar="sd")
     plt.title("NSE by Lookback and Model")
     plt.tight_layout()
     plt.savefig(out_dir / "lookback_nse_comparison.png", dpi=150)
     plt.close()
 
     plt.figure(figsize=(10, 4))
-    sns.lineplot(data=df, x="lookback", y="RMSE", hue="model", marker="o", errorbar="sd")
+    sns.lineplot(data=selection_df, x="lookback", y="RMSE", hue="model", marker="o", errorbar="sd")
     plt.title("RMSE by Lookback and Model")
     plt.tight_layout()
     plt.savefig(out_dir / "lookback_rmse_comparison.png", dpi=150)
@@ -186,15 +207,32 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--source_dir", type=Path, default=DEFAULT_SOURCE_DIR)
     parser.add_argument("--lookback_values", type=str, default=DEFAULT_LOOKBACK_VALUES)
     parser.add_argument("--horizon", type=int, default=1)
-    parser.add_argument("--train_ratio", type=float, default=0.7)
-    parser.add_argument("--val_ratio", type=float, default=0.2)
+    parser.add_argument("--train_ratio", type=float, default=0.6)
+    parser.add_argument("--val_ratio", type=float, default=0.1)
+    parser.add_argument("--selection_ratio", type=float, default=0.1)
+    parser.add_argument("--calib_ratio", type=float, default=0.15)
     parser.add_argument("--epochs", type=int, default=60)
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--patience", type=int, default=10)
+    parser.add_argument("--dropout", type=float, default=0.2)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--out_dir", type=Path, default=Path("outputs_lookback_sweep"))
-    parser.add_argument("--future_steps", type=int, default=30)
+    parser.add_argument("--holdout_steps", type=int, default=30)
+    parser.add_argument("--gamma", type=float, default=0.5)
+    parser.add_argument("--lambda_t", type=float, default=0.02)
+    parser.add_argument("--disable_intervals", action="store_true")
+    parser.add_argument("--disable_explain", action="store_true")
+    parser.set_defaults(enable_peak_analysis=True)
+    parser.add_argument("--enable_peak_analysis", dest="enable_peak_analysis", action="store_true")
+    parser.add_argument("--disable_peak_analysis", dest="enable_peak_analysis", action="store_false")
+    parser.add_argument("--peak_tolerance", type=int, default=None)
+    parser.add_argument("--peak_prominence_scale", type=float, default=None)
+    parser.add_argument("--peak_distance_min", type=int, default=1)
+    parser.add_argument("--peak_plot_models", type=lambda raw: [m.strip().lower() for m in raw.split(",") if m.strip()], default="lstm,transformer,tcn,stacking")
+    parser.add_argument("--shap_bg_samples", type=int, default=80)
+    parser.add_argument("--shap_explain_samples", type=int, default=40)
+    parser.add_argument("--explain_sample_index", type=int, default=0)
     return parser
 
 
@@ -203,8 +241,11 @@ def main() -> None:
     args.source_dir = args.source_dir.resolve()
     args.out_dir = args.out_dir.resolve()
 
-    if args.train_ratio + args.val_ratio >= 1.0:
-        raise ValueError("train_ratio + val_ratio must be less than 1.0")
+    if isinstance(args.peak_plot_models, str):
+        args.peak_plot_models = [m.strip().lower() for m in args.peak_plot_models.split(",") if m.strip()]
+
+    if args.train_ratio + args.val_ratio + args.selection_ratio + args.calib_ratio >= 1.0:
+        raise ValueError("train_ratio + val_ratio + selection_ratio + calib_ratio must be less than 1.0")
 
     learn = load_learn_module(args.source_dir)
     lookback_values = parse_lookback_values(args.lookback_values)

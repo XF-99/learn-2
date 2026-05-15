@@ -1,132 +1,175 @@
-# 地下水位预测与可解释性分析（3口井周尺度数据）
+# Groundwater Forecasting
 
-本项目使用 `LSTM + Transformer + TCN + XGBoost Stacking` 进行地下水位（`GWL`）预测，并输出：
-- 点预测结果
-- 95% 置信区间（加权 conformal）
-- 注意力可视化（默认开启）
-- SHAP 可解释图（环境安装 `shap` 时自动开启）
+This repository trains and evaluates weekly groundwater level forecasting models for three aquifer types:
 
-## 1. 数据文件
+- `f` / 裂隙水
+- `k` / 岩溶水
+- `p` / 孔隙水
 
-目录下默认使用以下 3 个 CSV：
-- `岩溶水_每周数据.csv`
-- `孔隙水_每周数据.csv`
-- `裂隙水_每周数据.csv`
+The current version uses 9 wells in total, 3 wells per aquifer type. All wells are aligned to the same weekly time span so model metrics can be averaged by aquifer type.
 
-字段约定：
-- `Date`
-- `GWL`
-- `TASMAX`
-- `TAS`
-- `Precipitation`
+## Current Dataset
 
-## 2. 模型与流程
+The model reads weekly CSV files from:
 
-主脚本：`learn.py`
-
-核心流程：
-1. 按时间排序并构造滑动窗口序列（`lookback/horizon`）
-2. 按时间切分 `train/val/calib/test`
-3. 训练 LSTM、Transformer、TCN 三个基模型
-4. 用 XGBoost 学习 stacking 残差修正
-5. 使用 calibration 集做加权 conformal，输出 **95% 区间**
-6. 输出测试集与未来滚动预测图/表
-7. 解释输出：
-   - attention：默认生成
-   - SHAP：检测到 `shap` 后自动生成
-
-## 3. 运行方式
-
-默认运行（会生成预测图、95%区间、attention；若已安装 shap 则额外生成 SHAP）：
-
-```bash
-python learn.py
+```text
+selected_weekly_data_9wells_common/
 ```
 
-快速烟雾测试（低成本）：
+The common time span is:
 
-```bash
-python learn.py --epochs 1 --patience 1 --future_steps 2
+```text
+1969-01-13 to 2016-01-18
 ```
 
-关闭解释输出：
+Each well file has 2454 weekly rows and the same columns:
 
-```bash
-python learn.py --disable_explain
+```text
+Date,TASMAX,TAS,TASMIN,Humidity,Precipitation,GWL
 ```
 
-常用参数：
-- `--lookback` 默认 `12`
-- `--horizon` 默认 `1`
-- `--train_ratio` 默认 `0.6`
-- `--val_ratio` 默认 `0.1`
-- `--calib_ratio` 默认 `0.15`
-- `--future_steps` 默认 `30`
-- `--out_dir` 默认 `outputs`
+The selected wells are documented in:
 
-## 4. 输出目录结构
+```text
+selected_weekly_data_9wells_common/nine_wells_summary.csv
+```
 
-默认输出到 `outputs/`，每口井一个子目录：
+The legacy 3-type CSV files in the repository root are also updated, but the main training code now uses the 9-well common-span dataset.
+
+## Model Pipeline
+
+`learn.py` runs a strict time-series workflow:
+
+```text
+train -> val -> selection -> calib -> test -> future_holdout
+```
+
+The split usage is:
+
+- `train`: neural network fitting.
+- `val`: early stopping and stacking residual model training.
+- `selection`: lookback/dropout hyperparameter selection only.
+- `calib`: conformal interval calibration only.
+- `test`: historical final evaluation.
+- `future_holdout`: final 30 weeks, recursively forecast with true future weather variables.
+
+The model features are:
+
+```text
+GWL,TASMAX,TAS,TASMIN,Humidity,Precipitation
+```
+
+The model comparison includes:
+
+- Persistence baseline
+- LSTM
+- Transformer
+- TCN
+- XGBoost residual stacking
+
+For `future_holdout`, both model forecasts and the persistence baseline use recursive GWL input. The first future step starts from the last observed GWL before the holdout; later steps use prior predictions.
+
+## Final Settings
+
+The current default final settings are:
+
+```text
+lookback = 18
+dropout = 0.4
+batch_size = 128
+holdout_steps = 30
+selection_ratio = 0.1
+calib_ratio = 0.15
+```
+
+The selected hyperparameters came from selection-split experiments, so the test and future holdout splits are not used for hyperparameter selection.
+
+## Run
+
+Full run with intervals, SHAP, and peak analysis:
+
+```powershell
+python learn.py --out_dir outputs
+```
+
+Basic run without interval prediction, SHAP, or peak analysis:
+
+```powershell
+python learn.py --out_dir outputs_basic --disable_intervals --disable_explain --disable_peak_analysis --batch_size 128
+```
+
+Lookback sweep:
+
+```powershell
+python lookback_experiment.py --batch_size 128
+```
+
+Dropout sweep:
+
+```powershell
+python dropout_experiment.py --lookback 18 --batch_size 128
+```
+
+## Outputs
+
+The committed final outputs are in:
 
 ```text
 outputs/
-  metrics_summary.csv
-  metrics_summary.json
-  rmse_comparison.png
-  nse_comparison.png
-  岩溶水/
-    predictions.csv
-    future_predictions.csv
-    test_predictions.png
-    stacking_predictions.png
-    future_forecast.png
-    explain/
-      transformer_attention_heatmap_sample.png
-      transformer_shap_beeswarm.png
-      transformer_shap_heatmap_sample.png
-      transformer_shap_waterfall_sample.png
-      stacking_xgb_shap_beeswarm.png
-      stacking_xgb_shap_waterfall_sample.png
-  孔隙水/
-  裂隙水/
 ```
 
-说明：
-- 预测 CSV 中仅保留 `PI95_Lower/PI95_Upper`
-- 指标中仅保留 95% 区间相关指标（如 `PICP95`、`MPIW95`）
+Root-level outputs include:
 
-## 5. 环境依赖
-
-基础依赖：
-- `numpy`
-- `pandas`
-- `matplotlib`
-- `seaborn`
-- `scikit-learn`
-- `torch`
-- `xgboost`
-- `scipy`（用于 STFT，可选）
-
-可解释性增强：
-- `shap`（安装后自动输出 SHAP 图）
-
-安装示例：
-
-```bash
-pip install numpy pandas matplotlib seaborn scikit-learn torch xgboost scipy shap
+```text
+metrics_summary.csv
+metrics_summary.json
+metrics_by_type_summary.csv
+rmse_comparison.png
+nse_comparison.png
+peak_metrics_summary.csv
 ```
 
-## 6. 常见问题
+Each well directory includes:
 
-### Q1：图里中文显示成方框
-代码已内置中文字体自动检测并设置。若系统缺少中文字体，请安装以下任一字体：
-- Microsoft YaHei
-- SimHei
-- Noto Sans CJK SC
+```text
+test_predictions.csv
+future_holdout_predictions.csv
+test_predictions.png
+future_holdout_predictions.png
+stacking_residuals.png
+time_frequency.png
+explain/
+peak/
+```
 
-### Q2：为什么没有 SHAP 图
-请确认运行环境安装了 `shap`，并且未使用 `--disable_explain`。
+Prediction CSV files include conformal 95% interval columns:
 
-### Q3：为什么看到 `PermutationExplainer` 进度
-这是 SHAP 解释过程的正常输出，不影响结果。
+```text
+PI95_Lower,PI95_Upper
+```
 
+The `explain/` directory contains Transformer attention and SHAP figures. The `peak/` directory contains peak detection plots and peak metrics.
+
+Hyperparameter experiment outputs are stored in:
+
+```text
+outputs_9wells_lookback/
+outputs_9wells_dropout/
+```
+
+## Validation
+
+The data-flow tests check the strict split logic, train-only scaler fitting, future weather alignment, recursive holdout behavior, and persistence baselines:
+
+```powershell
+python -m pytest test_learn_data_flow.py
+```
+
+The final full run was also checked for:
+
+- 9 well output directories.
+- 90 individual metric rows.
+- 30 type-averaged metric rows.
+- `test` and `future_holdout` metrics for all 5 models.
+- 30 rows in every `future_holdout_predictions.csv`.
+- No missing SHAP, interval, or peak-analysis outputs.
