@@ -1,77 +1,77 @@
-# Groundwater Forecasting
+# 地下水水位预测项目
 
-This repository trains and evaluates weekly groundwater level forecasting models for three aquifer types:
+本项目用于三类地下水含水层的周尺度地下水水位预测：
 
-- `f` / 裂隙水
-- `k` / 岩溶水
-- `p` / 孔隙水
+- `f`：裂隙水
+- `k`：岩溶水
+- `p`：孔隙水
 
-The current version uses 9 wells in total, 3 wells per aquifer type. All wells are aligned to the same weekly time span so model metrics can be averaged by aquifer type.
+当前版本共使用 9 口井，每类地下水 3 口井。所有井的数据已经统一到相同的周时间跨度，便于按地下水类型计算平均指标并进行对比。
 
-## Current Dataset
+## 当前数据集
 
-The model reads weekly CSV files from:
+主程序默认读取以下目录中的 9 井周数据：
 
 ```text
 selected_weekly_data_9wells_common/
 ```
 
-The common time span is:
+9 口井统一后的时间范围为：
 
 ```text
-1969-01-13 to 2016-01-18
+1969-01-13 至 2016-01-18
 ```
 
-Each well file has 2454 weekly rows and the same columns:
+每口井均有 2454 条周数据，字段顺序一致：
 
 ```text
 Date,TASMAX,TAS,TASMIN,Humidity,Precipitation,GWL
 ```
 
-The selected wells are documented in:
+9 口井清单记录在：
 
 ```text
 selected_weekly_data_9wells_common/nine_wells_summary.csv
 ```
 
-The legacy 3-type CSV files in the repository root are also updated, but the main training code now uses the 9-well common-span dataset.
+仓库根目录下原有的三份类型数据文件也已更新，但当前训练主程序使用的是 `selected_weekly_data_9wells_common/` 中的 9 井共同时间跨度数据。
 
-## Model Pipeline
+## 模型流程
 
-`learn.py` runs a strict time-series workflow:
+`learn.py` 使用严格的时间序列划分：
 
 ```text
 train -> val -> selection -> calib -> test -> future_holdout
 ```
 
-The split usage is:
+各数据段用途如下：
 
-- `train`: neural network fitting.
-- `val`: early stopping and stacking residual model training.
-- `selection`: lookback/dropout hyperparameter selection only.
-- `calib`: conformal interval calibration only.
-- `test`: historical final evaluation.
-- `future_holdout`: final 30 weeks, recursively forecast with true future weather variables.
+- `train`：训练神经网络模型。
+- `val`：用于早停，并训练 stacking 残差模型。
+- `selection`：只用于 lookback 和 dropout 等超参数选择。
+- `calib`：只用于 conformal 区间预测校准。
+- `test`：历史测试集最终评估。
+- `future_holdout`：最后 30 周，模拟未来预测，只使用真实气象变量，GWL 递推预测。
 
-The model features are:
+模型输入特征为：
 
 ```text
 GWL,TASMAX,TAS,TASMIN,Humidity,Precipitation
 ```
 
-The model comparison includes:
+对比模型包括：
 
-- Persistence baseline
+- Persistence 基线模型
 - LSTM
 - Transformer
 - TCN
-- XGBoost residual stacking
+- XGBoost 残差 Stacking
 
-For `future_holdout`, both model forecasts and the persistence baseline use recursive GWL input. The first future step starts from the last observed GWL before the holdout; later steps use prior predictions.
+在 `future_holdout` 中，模型和 Persistence 基线都采用递推口径。第一周使用 holdout 前最后一周真实 GWL，之后每一步使用上一周预测 GWL 继续递推。
 
-## Final Settings
+## 最终参数
 
-The current default final settings are:
+当前最终默认参数为：
 
 ```text
 lookback = 18
@@ -82,43 +82,43 @@ selection_ratio = 0.1
 calib_ratio = 0.15
 ```
 
-The selected hyperparameters came from selection-split experiments, so the test and future holdout splits are not used for hyperparameter selection.
+这些超参数来自 `selection` 数据段上的实验结果，没有使用 `test` 或 `future_holdout` 选择参数，因此不会污染最终测试集。
 
-## Run
+## 运行方式
 
-Full run with intervals, SHAP, and peak analysis:
+完整运行，包含区间预测、SHAP 解释和峰值分析：
 
 ```powershell
 python learn.py --out_dir outputs
 ```
 
-Basic run without interval prediction, SHAP, or peak analysis:
+只跑基础预测，不跑区间预测、SHAP 和峰值分析：
 
 ```powershell
 python learn.py --out_dir outputs_basic --disable_intervals --disable_explain --disable_peak_analysis --batch_size 128
 ```
 
-Lookback sweep:
+运行 lookback 超参数实验：
 
 ```powershell
 python lookback_experiment.py --batch_size 128
 ```
 
-Dropout sweep:
+运行 dropout 超参数实验：
 
 ```powershell
 python dropout_experiment.py --lookback 18 --batch_size 128
 ```
 
-## Outputs
+## 输出结果
 
-The committed final outputs are in:
+当前 GitHub 中已提交的最终结果位于：
 
 ```text
 outputs/
 ```
 
-Root-level outputs include:
+根目录输出包括：
 
 ```text
 metrics_summary.csv
@@ -129,7 +129,7 @@ nse_comparison.png
 peak_metrics_summary.csv
 ```
 
-Each well directory includes:
+每口井目录中包括：
 
 ```text
 test_predictions.csv
@@ -142,34 +142,34 @@ explain/
 peak/
 ```
 
-Prediction CSV files include conformal 95% interval columns:
+预测 CSV 中包含 95% 区间预测列：
 
 ```text
 PI95_Lower,PI95_Upper
 ```
 
-The `explain/` directory contains Transformer attention and SHAP figures. The `peak/` directory contains peak detection plots and peak metrics.
+`explain/` 目录中包含 Transformer attention 和 SHAP 图。`peak/` 目录中包含峰值识别图和峰值指标。
 
-Hyperparameter experiment outputs are stored in:
+超参数实验结果位于：
 
 ```text
 outputs_9wells_lookback/
 outputs_9wells_dropout/
 ```
 
-## Validation
+## 验证
 
-The data-flow tests check the strict split logic, train-only scaler fitting, future weather alignment, recursive holdout behavior, and persistence baselines:
+数据流测试覆盖严格时序划分、训练集 scaler 拟合、future holdout 气象变量对齐、递推预测和 Persistence baseline：
 
 ```powershell
-python -m pytest test_learn_data_flow.py
+python test_learn_data_flow.py
 ```
 
-The final full run was also checked for:
+最终完整运行已经检查：
 
-- 9 well output directories.
-- 90 individual metric rows.
-- 30 type-averaged metric rows.
-- `test` and `future_holdout` metrics for all 5 models.
-- 30 rows in every `future_holdout_predictions.csv`.
-- No missing SHAP, interval, or peak-analysis outputs.
+- 共 9 个井输出目录。
+- `metrics_summary.csv` 共 90 行。
+- `metrics_by_type_summary.csv` 共 30 行。
+- `test` 和 `future_holdout` 都包含 5 个模型。
+- 每个 `future_holdout_predictions.csv` 正好 30 行。
+- 区间预测、SHAP 解释和峰值分析文件均已生成。
