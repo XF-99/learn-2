@@ -1,4 +1,0 @@
-﻿well_id,name,aquifer_type,chinese_type,x_coord_utm32n,y_coord_utm32n,ground_surface_m_asl,depth_to_gw_m,start_date,end_date,valid_weeks,output_file
-HE_6253,NETRA,f,裂隙水,576396,5661004,312.7,8.86,1952-02-11,2018-01-29,3443,裂隙水_HE_6253_每周数据.csv
-BY_15120,IHRLERSTEIN TIEF K1,k,岩溶水,707357,5426437,480.03,94.03,1967-07-10,2017-07-10,2610,岩溶水_BY_15120_每周数据.csv
-SN_46460564,Walda,p,孔隙水,813164,5695042,109.22,1.9,1951-01-08,2017-11-13,3489,孔隙水_SN_46460564_每周数据.csv

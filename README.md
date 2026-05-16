@@ -34,7 +34,7 @@ Date,TASMAX,TAS,TASMIN,Humidity,Precipitation,GWL
 selected_weekly_data_9wells_common/nine_wells_summary.csv
 ```
 
-仓库根目录下原有的三份类型数据文件也已更新，但当前训练主程序使用的是 `selected_weekly_data_9wells_common/` 中的 9 井共同时间跨度数据。
+仓库中已移除旧版 3 井数据集和根目录类型级周数据文件；当前训练主程序只使用 `selected_weekly_data_9wells_common/` 中的 9 井共同时间跨度数据。
 
 ## 模型流程
 

@@ -8,7 +8,8 @@
 - 修复默认 `python` 环境无法导入 `torch`、`xgboost` 导致项目和测试无法运行的问题。
 - 更新 `.gitignore`，忽略 `vendor/` 和 `outputs*/`，避免误提交本地依赖和实验输出。
 - 扩展 `validate_selected_weekly_data.py`，默认验证当前主流程使用的 `selected_weekly_data_9wells_common/`。
-- 保留旧版 3 井数据验证，可通过 `--dataset legacy` 运行；`--dataset both` 可同时验证 3 井和 9 井数据。
+- 移除旧版 `selected_weekly_data/` 3 井数据集和根目录类型级周数据文件，仓库只保留当前 9 井训练数据集。
+- 旧版 3 井验证入口仍保留给重新生成旧数据时使用；默认验证只检查当前 9 井数据集。
 - 新增测试覆盖 9 井数据验证入口，确保当前训练数据集会被自动检查。
 
 ### 验证
