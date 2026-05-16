@@ -5,6 +5,7 @@ import pandas as pd
 
 import learn
 import lookback_experiment
+import validate_selected_weekly_data
 
 
 FEATURES = ["GWL", "TASMAX", "TAS", "TASMIN", "Humidity", "Precipitation"]
@@ -106,6 +107,11 @@ class LookbackSelectionTests(unittest.TestCase):
         best = lookback_experiment.choose_best_lookback(summary)
         self.assertEqual(best["selection_split"], "selection")
         self.assertEqual(best["best_lookback"], 18)
+
+
+class SelectedWeeklyValidationTests(unittest.TestCase):
+    def test_validate_nine_well_outputs_covers_current_training_dataset(self):
+        validate_selected_weekly_data.validate_nine_well_output_files()
 
 
 if __name__ == "__main__":

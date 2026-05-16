@@ -13,6 +13,8 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
+import vendor_bootstrap  # noqa: F401
+
 import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns

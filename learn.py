@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import vendor_bootstrap  # noqa: F401
+
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np

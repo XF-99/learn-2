@@ -1,5 +1,25 @@
 # 更新日志
 
+## 2026-05-16 - 修复默认环境并补齐 9 井数据验证
+
+### 主要变化
+
+- 新增 `vendor_bootstrap.py`，在主训练脚本和实验脚本启动时优先加载项目本地 `vendor/` 依赖目录。
+- 修复默认 `python` 环境无法导入 `torch`、`xgboost` 导致项目和测试无法运行的问题。
+- 更新 `.gitignore`，忽略 `vendor/` 和 `outputs*/`，避免误提交本地依赖和实验输出。
+- 扩展 `validate_selected_weekly_data.py`，默认验证当前主流程使用的 `selected_weekly_data_9wells_common/`。
+- 保留旧版 3 井数据验证，可通过 `--dataset legacy` 运行；`--dataset both` 可同时验证 3 井和 9 井数据。
+- 新增测试覆盖 9 井数据验证入口，确保当前训练数据集会被自动检查。
+
+### 验证
+
+```powershell
+python -c "import learn; print('learn imported'); print('torch', learn.torch.__version__)"
+python test_learn_data_flow.py
+python validate_selected_weekly_data.py
+python -m py_compile learn.py lookback_experiment.py dropout_experiment.py prepare_nine_well_common_data.py prepare_selected_weekly_data.py validate_selected_weekly_data.py test_learn_data_flow.py vendor_bootstrap.py
+```
+
 ## 2026-05-15 - 替换为 9 井严格留出预测流程
 
 ### 主要变化
