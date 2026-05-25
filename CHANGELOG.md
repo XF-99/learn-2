@@ -5,9 +5,10 @@
 ### 结构整理
 
 - 根目录只保留项目级说明文件：`README.md`、`CHANGELOG.md`、`.gitignore`。
-- 15 口井实验相关代码、数据、输出和测试全部集中到 `test/` 目录。
+- 15 口井实验相关运行代码、数据、输出和日志全部集中到 `test/` 目录。
 - 删除根目录重复的 `learn.py`、`vendor_bootstrap.py`。
-- 将可重复性分析、数据校验和单元测试脚本移动到 `test/`。
+- 将可重复性分析脚本移动到 `test/`。
+- 删除不再需要的数据准备、筛选优化、数据校验和单元测试脚本。
 - `RUN_LOG.md`、README 和可重复性报告改为中文说明。
 
 ### 当前实验主线
@@ -35,7 +36,5 @@
 ### 验证命令
 
 ```powershell
-python -m py_compile test\learn.py test\reproducible_model_selection.py test\validate_selected_weekly_data.py test\prepare_15wells.py test\run_15wells_test_focus.py test\run_15wells_interval_focus.py test\optimize_15wells_dynamic_gate.py
-python test\validate_selected_weekly_data.py
-python -m unittest discover -s test -p "test_*.py"
+python -m py_compile test\learn.py test\reproducible_model_selection.py test\run_15wells_test_focus.py test\run_15wells_interval_focus.py test\run_15wells_shap_focus.py test\run_15wells_peak_focus.py test\run_15wells_lookback_sweep.py
 ```

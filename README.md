@@ -12,15 +12,12 @@
 ├── CHANGELOG.md
 └── test/
     ├── learn.py
-    ├── prepare_15wells.py
     ├── run_15wells_test_focus.py
     ├── run_15wells_interval_focus.py
     ├── run_15wells_shap_focus.py
     ├── run_15wells_peak_focus.py
     ├── run_15wells_lookback_sweep.py
-    ├── optimize_15wells_dynamic_gate.py
     ├── reproducible_model_selection.py
-    ├── validate_selected_weekly_data.py
     ├── selected_weekly_data_15wells_current/
     └── outputs_15wells_interval_focus/
 ```
@@ -147,17 +144,5 @@ test/outputs_15wells_interval_focus/reproducible_selection/
 编译检查：
 
 ```powershell
-python -m py_compile test\learn.py test\reproducible_model_selection.py test\validate_selected_weekly_data.py test\prepare_15wells.py test\run_15wells_test_focus.py test\run_15wells_interval_focus.py test\optimize_15wells_dynamic_gate.py
-```
-
-单元测试：
-
-```powershell
-python -m unittest discover -s test -p "test_*.py"
-```
-
-数据检查：
-
-```powershell
-python test\validate_selected_weekly_data.py
+python -m py_compile test\learn.py test\reproducible_model_selection.py test\run_15wells_test_focus.py test\run_15wells_interval_focus.py test\run_15wells_shap_focus.py test\run_15wells_peak_focus.py test\run_15wells_lookback_sweep.py
 ```
