@@ -44,9 +44,16 @@ else:
     mpl.rcParams["font.sans-serif"] = _FONT_CANDIDATES
 mpl.rcParams["axes.unicode_minus"] = False
 
-def _load_default_wells() -> Tuple[List[Tuple[str, str]], Dict[str, str]]:
-    data_dir = Path(__file__).resolve().parent / "selected_weekly_data_9wells_common"
-    summary_path = data_dir / "nine_wells_summary.csv"
+def _load_default_wells(wells_dir: Optional[str] = None) -> Tuple[List[Tuple[str, str]], Dict[str, str]]:
+    root = Path(__file__).resolve().parent
+    if wells_dir is not None:
+        data_dir = Path(wells_dir)
+        if not data_dir.is_absolute():
+            data_dir = root / data_dir
+        summary_path = data_dir / "selected_wells_summary.csv"
+    else:
+        data_dir = root / "test" / "selected_weekly_data_15wells_current"
+        summary_path = data_dir / "selected_wells_summary.csv"
     if summary_path.exists():
         summary = pd.read_csv(summary_path)
         wells: List[Tuple[str, str]] = []
@@ -81,7 +88,38 @@ PEAK_MODEL_COLUMNS = {
     "transformer": "Transformer",
     "tcn": "TCN",
     "stacking": "Stacking",
+    "dynamic": "DynamicGatedStacking",
+    "dynamicgatedstacking": "DynamicGatedStacking",
 }
+BASE_MODEL_NAMES = ("LSTM", "Transformer", "TCN")
+DEFAULT_TCN_CHANNELS = "32,32,32,32"
+DEFAULT_TCN_KERNEL = 3
+DYNAMIC_MODEL_NAME = "DynamicGatedStacking"
+
+
+def parse_tcn_channels(raw: str) -> List[int]:
+    channels = []
+    for part in str(raw).split(","):
+        part = part.strip()
+        if not part:
+            continue
+        value = int(part)
+        if value <= 0:
+            raise ValueError("tcn channel values must be positive integers")
+        channels.append(value)
+    if not channels:
+        raise ValueError("tcn_channels must contain at least one positive integer")
+    return channels
+
+
+def tcn_receptive_field(kernel: int, n_layers: int) -> int:
+    if kernel <= 0:
+        raise ValueError("tcn kernel must be positive")
+    if n_layers <= 0:
+        raise ValueError("tcn layer count must be positive")
+    return 1 + (kernel - 1) * ((2**n_layers) - 1)
+
+
 @dataclass
 class SplitData:
     X_train: np.ndarray
@@ -101,6 +139,7 @@ class SplitData:
     dates_calib: np.ndarray
     dates_test: np.ndarray
     dates_future_holdout: np.ndarray
+    idx_val: np.ndarray
     idx_selection: np.ndarray
     idx_calib: np.ndarray
     idx_test: np.ndarray
@@ -225,16 +264,23 @@ class TCNBlock(nn.Module):
         self.conv = nn.Conv1d(in_ch, out_ch, kernel, padding=padding, dilation=dilation)
         self.relu = nn.ReLU()
         self.drop = nn.Dropout(dropout)
+        self.residual = nn.Identity() if in_ch == out_ch else nn.Conv1d(in_ch, out_ch, kernel_size=1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.conv(x)
-        x = x[:, :, : -self.conv.padding[0]]
-        return self.drop(self.relu(x))
+        residual = self.residual(x)
+        out = self.conv(x)
+        padding = self.conv.padding[0]
+        if padding > 0:
+            out = out[:, :, :-padding]
+        out = self.drop(self.relu(out))
+        return self.relu(out + residual)
 
 
 class TCNRegressor(nn.Module):
     def __init__(self, n_features: int, channels: List[int], kernel: int, dropout: float):
         super().__init__()
+        if not channels:
+            raise ValueError("TCNRegressor requires at least one channel")
         layers = []
         in_ch = n_features
         for i, ch in enumerate(channels):
@@ -251,6 +297,19 @@ class TCNRegressor(nn.Module):
         x = self.tcn(x)
         x = x[:, :, -1]
         return self.head(x).squeeze(-1)
+
+
+class DynamicGateRegressor(nn.Module):
+    def __init__(self, input_dim: int, hidden: int, n_models: int = 3):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(input_dim, hidden),
+            nn.ReLU(),
+            nn.Linear(hidden, n_models),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return torch.softmax(self.net(x), dim=1)
 
 
 def set_seed(seed: int) -> None:
@@ -341,6 +400,7 @@ def prepare_splits(
     calib_end = calib_start + calib_size
     X_calib, y_calib = X[calib_start:calib_end], y[calib_start:calib_end]
     X_test, y_test = X[calib_end:], y[calib_end:]
+    idx_val = idx[val_start:val_end]
     idx_selection = idx[selection_start:selection_end]
     idx_calib = idx[calib_start:calib_end]
     idx_test = idx[calib_end:]
@@ -371,6 +431,7 @@ def prepare_splits(
         dates_calib=dates_calib,
         dates_test=dates_test,
         dates_future_holdout=dates_future_holdout,
+        idx_val=idx_val,
         idx_selection=idx_selection,
         idx_calib=idx_calib,
         idx_test=idx_test,
@@ -444,6 +505,33 @@ def predict(model: nn.Module, X: np.ndarray, device: torch.device) -> np.ndarray
     return np.concatenate(preds)
 
 
+def mc_dropout_predict(
+    model: nn.Module,
+    X: np.ndarray,
+    device: torch.device,
+    samples: int,
+    batch_size: int = 256,
+) -> Tuple[np.ndarray, np.ndarray]:
+    if samples <= 0:
+        raise ValueError("mc_dropout_samples must be positive.")
+    was_training = model.training
+    model.train()
+    draws = []
+    loader = DataLoader(SequenceDataset(X, np.zeros(len(X))), batch_size=batch_size, shuffle=False)
+    try:
+        with torch.no_grad():
+            for _ in range(samples):
+                preds = []
+                for X_batch, _ in loader:
+                    X_batch = X_batch.to(device)
+                    preds.append(model(X_batch).detach().cpu().numpy())
+                draws.append(np.concatenate(preds))
+    finally:
+        model.train(was_training)
+    stacked = np.vstack(draws)
+    return stacked.mean(axis=0), stacked.std(axis=0)
+
+
 def metrics(y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, float]:
     # 在该任务下 NSE 与 R2 等价，保留两者便于水文报告。
     rmse = mean_squared_error(y_true, y_pred) ** 0.5
@@ -460,17 +548,153 @@ def inverse_target(scaler: StandardScaler, y_scaled: np.ndarray, n_features: int
     return scaler.inverse_transform(zeros)[:, 0]
 
 
-def persistence_for_indices(df: pd.DataFrame, target_idx: np.ndarray, target: str = "GWL") -> np.ndarray:
-    target_idx = np.asarray(target_idx, dtype=int)
-    if len(target_idx) == 0:
-        return np.array([], dtype=float)
-    if np.any(target_idx <= 0):
-        raise ValueError("Persistence baseline needs a previous observed target.")
-    return df[target].iloc[target_idx - 1].to_numpy(dtype=float)
+def scale_target_values(scaler: StandardScaler, values: np.ndarray) -> np.ndarray:
+    values = np.asarray(values, dtype=float)
+    return (values - float(scaler.mean_[0])) / float(scaler.scale_[0])
 
 
-def recursive_persistence(last_actual: float, steps: int) -> np.ndarray:
-    return np.full(int(steps), float(last_actual), dtype=float)
+def create_stacking_xgb(seed: int) -> XGBRegressor:
+    return XGBRegressor(
+        n_estimators=300,
+        max_depth=4,
+        learning_rate=0.05,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        random_state=seed,
+    )
+
+
+def create_dynamic_residual_xgb(
+    seed: int,
+    n_estimators: int = 50,
+    max_depth: int = 1,
+    learning_rate: float = 0.03,
+    reg_lambda: float = 10.0,
+    min_child_weight: float = 5.0,
+) -> XGBRegressor:
+    return XGBRegressor(
+        n_estimators=n_estimators,
+        max_depth=max_depth,
+        learning_rate=learning_rate,
+        subsample=0.7,
+        colsample_bytree=0.8,
+        reg_lambda=reg_lambda,
+        min_child_weight=min_child_weight,
+        random_state=seed,
+    )
+
+
+def apply_residual_correction(
+    gated_prediction: np.ndarray,
+    residual_model: Optional[XGBRegressor],
+    residual_features: np.ndarray,
+) -> np.ndarray:
+    return np.asarray(gated_prediction, dtype=float) + residual_model.predict(residual_features).reshape(-1)
+
+
+def choose_dynamic_residual_usage(
+    y_true: np.ndarray,
+    gated_only_prediction: np.ndarray,
+    residual_prediction: np.ndarray,
+) -> Dict[str, Any]:
+    gated_rmse = mean_squared_error(y_true, gated_only_prediction) ** 0.5
+    residual_rmse = mean_squared_error(y_true, residual_prediction) ** 0.5
+    return {
+        "gated_only_selection_RMSE": float(gated_rmse),
+        "residual_selection_RMSE": float(residual_rmse),
+        "use_residual": bool(residual_rmse < gated_rmse),
+    }
+
+
+def dynamic_gate_feature_matrix(
+    means_by_model: Dict[str, np.ndarray],
+    stds_by_model: Dict[str, np.ndarray],
+) -> np.ndarray:
+    return np.column_stack(
+        [means_by_model[model] for model in BASE_MODEL_NAMES]
+        + [stds_by_model[model] for model in BASE_MODEL_NAMES]
+    )
+
+
+def dynamic_residual_feature_matrix(
+    gate_features: np.ndarray,
+    weights: np.ndarray,
+    gated_prediction: np.ndarray,
+) -> np.ndarray:
+    return np.column_stack([gate_features, weights, np.asarray(gated_prediction, dtype=float)])
+
+
+def train_dynamic_gate(
+    gate_features: np.ndarray,
+    base_predictions: np.ndarray,
+    y: np.ndarray,
+    hidden: int,
+    epochs: int,
+    lr: float,
+    patience: int,
+    device: torch.device,
+) -> DynamicGateRegressor:
+    if len(gate_features) == 0:
+        raise ValueError("Dynamic gate training requires at least one sample.")
+    gate = DynamicGateRegressor(input_dim=gate_features.shape[1], hidden=hidden, n_models=base_predictions.shape[1])
+    gate.to(device)
+    x_t = torch.tensor(gate_features, dtype=torch.float32, device=device)
+    base_t = torch.tensor(base_predictions, dtype=torch.float32, device=device)
+    y_t = torch.tensor(y, dtype=torch.float32, device=device)
+    optimizer = torch.optim.Adam(gate.parameters(), lr=lr)
+    criterion = nn.MSELoss()
+    best_loss = float("inf")
+    best_state = None
+    wait = 0
+
+    for _ in range(epochs):
+        gate.train()
+        optimizer.zero_grad()
+        weights = gate(x_t)
+        pred = torch.sum(weights * base_t, dim=1)
+        loss = criterion(pred, y_t)
+        loss.backward()
+        optimizer.step()
+
+        loss_value = float(loss.detach().cpu().item())
+        if loss_value < best_loss:
+            best_loss = loss_value
+            best_state = {k: v.detach().cpu().clone() for k, v in gate.state_dict().items()}
+            wait = 0
+        else:
+            wait += 1
+            if wait >= patience:
+                break
+
+    if best_state is not None:
+        gate.load_state_dict(best_state)
+    gate.eval()
+    return gate
+
+
+def dynamic_gate_predict(
+    gate: DynamicGateRegressor,
+    gate_features: np.ndarray,
+    base_predictions: np.ndarray,
+    device: torch.device,
+) -> Tuple[np.ndarray, np.ndarray]:
+    gate.eval()
+    with torch.no_grad():
+        x_t = torch.tensor(gate_features, dtype=torch.float32, device=device)
+        weights = gate(x_t).detach().cpu().numpy()
+    gated = np.sum(weights * base_predictions, axis=1)
+    return weights, gated
+
+
+def dynamic_gate_weight_rows(split_name: str, dates: np.ndarray, weights: np.ndarray) -> List[Dict[str, Any]]:
+    rows = []
+    for date, row in zip(dates, weights):
+        item = {"split": split_name, "Date": date}
+        for model_name, value in zip(BASE_MODEL_NAMES, row):
+            item[f"weight_{model_name}"] = float(value)
+        item["weight_sum"] = float(np.sum(row))
+        rows.append(item)
+    return rows
 
 
 def stack_predict_scaled(
@@ -548,6 +772,70 @@ def recursive_future_holdout_predictions(
     scaled_arrays = {name: np.asarray(values, dtype=float) for name, values in scaled_preds.items()}
     orig_arrays = {name: inverse_target(scaler, values, n_features) for name, values in scaled_arrays.items()}
     return scaled_arrays, orig_arrays
+
+
+def recursive_dynamic_future_holdout_predictions(
+    lstm: nn.Module,
+    transformer: nn.Module,
+    tcn: nn.Module,
+    gate: DynamicGateRegressor,
+    residual_model: XGBRegressor,
+    seed_seq: np.ndarray,
+    known_features_scaled: np.ndarray,
+    scaler: StandardScaler,
+    n_features: int,
+    device: torch.device,
+    mc_dropout_samples: int,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    corrected_seq = seed_seq.copy()
+    gated_only_seq = seed_seq.copy()
+    scaled_preds = []
+    gated_only_preds = []
+    weight_rows = []
+    models = {"LSTM": lstm, "Transformer": transformer, "TCN": tcn}
+
+    def _predict_step(seq: np.ndarray) -> Tuple[np.ndarray, np.ndarray, float, float]:
+        means: Dict[str, np.ndarray] = {}
+        stds: Dict[str, np.ndarray] = {}
+        seq_batch = seq[np.newaxis, :, :]
+        for model_name, model in models.items():
+            mean, std = mc_dropout_predict(model, seq_batch, device, samples=mc_dropout_samples, batch_size=1)
+            means[model_name] = mean
+            stds[model_name] = std
+        gate_features = dynamic_gate_feature_matrix(means, stds)
+        base_matrix = np.column_stack([means[model] for model in BASE_MODEL_NAMES])
+        weights, gated = dynamic_gate_predict(gate, gate_features, base_matrix, device)
+        if residual_model is None:
+            corrected = float(gated[0])
+        else:
+            residual_features = dynamic_residual_feature_matrix(gate_features, weights, gated)
+            corrected = float(apply_residual_correction(gated, residual_model, residual_features)[0])
+        return weights[0], gated, float(gated[0]), corrected
+
+    for known_row in known_features_scaled:
+        weights, _, _, corrected = _predict_step(corrected_seq)
+        _, _, gated_only, _ = _predict_step(gated_only_seq)
+        weight_rows.append(weights)
+        scaled_preds.append(corrected)
+        gated_only_preds.append(gated_only)
+
+        corrected_row = known_row.copy()
+        corrected_row[0] = corrected
+        corrected_seq = np.vstack([corrected_seq[1:], corrected_row])
+
+        gated_only_row = known_row.copy()
+        gated_only_row[0] = gated_only
+        gated_only_seq = np.vstack([gated_only_seq[1:], gated_only_row])
+
+    scaled = np.asarray(scaled_preds, dtype=float)
+    gated_only_scaled = np.asarray(gated_only_preds, dtype=float)
+    return (
+        scaled,
+        inverse_target(scaler, scaled, n_features),
+        np.asarray(weight_rows, dtype=float),
+        gated_only_scaled,
+        inverse_target(scaler, gated_only_scaled, n_features),
+    )
 
 
 def weighted_quantile(values: np.ndarray, quantile: float, weights: np.ndarray) -> float:
@@ -1299,6 +1587,20 @@ def run_well(
     peak_distance_min: Optional[int],
     peak_plot_models: List[str],
     dropout: float = 0.4,
+    tcn_channels: Optional[List[int]] = None,
+    tcn_kernel: int = DEFAULT_TCN_KERNEL,
+    enable_dynamic_gate: bool = True,
+    mc_dropout_samples: int = 30,
+    gate_hidden: int = 16,
+    gate_epochs: int = 80,
+    gate_lr: float = 1e-3,
+    gate_patience: int = 10,
+    enable_dynamic_residual: bool = True,
+    dynamic_residual_n_estimators: int = 50,
+    dynamic_residual_max_depth: int = 1,
+    dynamic_residual_lr: float = 0.03,
+    dynamic_residual_reg_lambda: float = 10.0,
+    dynamic_residual_min_child_weight: float = 5.0,
 ) -> Tuple[pd.DataFrame, Dict[str, Dict[str, Dict[str, float]]]]:
     # 单井完整流程：数据切分、模型训练、集成预测、区间估计与结果落盘。
     df = load_data(file_path)
@@ -1329,9 +1631,16 @@ def run_well(
         shuffle=False,
     )
 
+    resolved_tcn_channels = tcn_channels if tcn_channels is not None else parse_tcn_channels(DEFAULT_TCN_CHANNELS)
+
     lstm = LSTMRegressor(n_features=len(features), hidden=64, layers=2, dropout=dropout)
     transformer = TransformerRegressor(n_features=len(features), d_model=64, heads=4, layers=2, dropout=dropout)
-    tcn = TCNRegressor(n_features=len(features), channels=[32, 32, 32], kernel=3, dropout=dropout)
+    tcn = TCNRegressor(
+        n_features=len(features),
+        channels=resolved_tcn_channels,
+        kernel=tcn_kernel,
+        dropout=dropout,
+    )
 
     lstm = train_model(lstm, train_loader, val_loader, device, epochs, lr, patience)
     transformer = train_model(transformer, train_loader, val_loader, device, epochs, lr, patience)
@@ -1342,14 +1651,7 @@ def run_well(
     pred_val_tcn = predict(tcn, split.X_val, device)
 
     # 使用 XGBoost 对基模型残差做二次学习（stacking）。
-    xgb = XGBRegressor(
-        n_estimators=300,
-        max_depth=4,
-        learning_rate=0.05,
-        subsample=0.8,
-        colsample_bytree=0.8,
-        random_state=42,
-    )
+    xgb = create_stacking_xgb(seed)
     stack_val_X = np.column_stack([pred_val_lstm, pred_val_trans, pred_val_tcn])
     stack_val_res = split.y_val - stack_val_X.mean(axis=1)
     xgb.fit(stack_val_X, stack_val_res)
@@ -1369,7 +1671,7 @@ def run_well(
     y_test_orig = inverse_target(split.scaler, split.y_test, n_features)
     y_future_orig = inverse_target(split.scaler, split.y_future_holdout, n_features)
 
-    _, pred_future_orig = recursive_future_holdout_predictions(
+    pred_future_scaled, pred_future_orig = recursive_future_holdout_predictions(
         lstm=lstm,
         transformer=transformer,
         tcn=tcn,
@@ -1380,32 +1682,141 @@ def run_well(
         n_features=n_features,
         device=device,
     )
-    test_persistence = persistence_for_indices(df, split.idx_test, target=target)
-    future_persistence = recursive_persistence(df[target].iloc[split.idx_future_holdout[0] - 1], len(split.idx_future_holdout))
+    dynamic_scaled: Dict[str, np.ndarray] = {}
+    dynamic_orig: Dict[str, np.ndarray] = {}
+    dynamic_gated_only_scaled: Dict[str, np.ndarray] = {}
+    dynamic_gated_only_orig: Dict[str, np.ndarray] = {}
+    dynamic_weights: Dict[str, np.ndarray] = {}
+    dynamic_residual_selection: Optional[Dict[str, Any]] = None
+    if enable_dynamic_gate:
+        mc_means: Dict[str, Dict[str, np.ndarray]] = {}
+        mc_stds: Dict[str, Dict[str, np.ndarray]] = {}
+        split_inputs = {
+            "val": split.X_val,
+            "selection": split.X_selection,
+            "calib": split.X_calib,
+            "test": split.X_test,
+        }
+        model_map = {"LSTM": lstm, "Transformer": transformer, "TCN": tcn}
+        for split_name, X_split in split_inputs.items():
+            mc_means[split_name] = {}
+            mc_stds[split_name] = {}
+            for model_name, model in model_map.items():
+                mean, std = mc_dropout_predict(
+                    model,
+                    X_split,
+                    device,
+                    samples=mc_dropout_samples,
+                )
+                mc_means[split_name][model_name] = mean
+                mc_stds[split_name][model_name] = std
+
+        gate_features_val = dynamic_gate_feature_matrix(mc_means["val"], mc_stds["val"])
+        base_val_matrix = np.column_stack([mc_means["val"][model] for model in BASE_MODEL_NAMES])
+        gate = train_dynamic_gate(
+            gate_features=gate_features_val,
+            base_predictions=base_val_matrix,
+            y=split.y_val,
+            hidden=gate_hidden,
+            epochs=gate_epochs,
+            lr=gate_lr,
+            patience=gate_patience,
+            device=device,
+        )
+        val_weights, val_gated = dynamic_gate_predict(gate, gate_features_val, base_val_matrix, device)
+        residual_xgb: Optional[XGBRegressor] = None
+        if enable_dynamic_residual:
+            residual_xgb = create_dynamic_residual_xgb(
+                seed=seed,
+                n_estimators=dynamic_residual_n_estimators,
+                max_depth=dynamic_residual_max_depth,
+                learning_rate=dynamic_residual_lr,
+                reg_lambda=dynamic_residual_reg_lambda,
+                min_child_weight=dynamic_residual_min_child_weight,
+            )
+            val_residual_features = dynamic_residual_feature_matrix(gate_features_val, val_weights, val_gated)
+            residual_xgb.fit(val_residual_features, split.y_val - val_gated)
+
+        for split_name in ("selection", "calib", "test"):
+            gate_features = dynamic_gate_feature_matrix(mc_means[split_name], mc_stds[split_name])
+            base_matrix = np.column_stack([mc_means[split_name][model] for model in BASE_MODEL_NAMES])
+            weights, gated = dynamic_gate_predict(gate, gate_features, base_matrix, device)
+            dynamic_weights[split_name] = weights
+            dynamic_gated_only_scaled[split_name] = gated
+            dynamic_gated_only_orig[split_name] = inverse_target(split.scaler, gated, n_features)
+            if residual_xgb is None:
+                dynamic_scaled[split_name] = gated
+            else:
+                residual_features = dynamic_residual_feature_matrix(gate_features, weights, gated)
+                dynamic_scaled[split_name] = apply_residual_correction(gated, residual_xgb, residual_features)
+            dynamic_orig[split_name] = inverse_target(split.scaler, dynamic_scaled[split_name], n_features)
+
+        (
+            dynamic_scaled["future_holdout"],
+            dynamic_orig["future_holdout"],
+            dynamic_weights["future_holdout"],
+            dynamic_gated_only_scaled["future_holdout"],
+            dynamic_gated_only_orig["future_holdout"],
+        ) = recursive_dynamic_future_holdout_predictions(
+            lstm=lstm,
+            transformer=transformer,
+            tcn=tcn,
+            gate=gate,
+            residual_model=residual_xgb,
+            seed_seq=split.X_future_seed,
+            known_features_scaled=split.future_known_features_scaled,
+            scaler=split.scaler,
+            n_features=n_features,
+            device=device,
+            mc_dropout_samples=mc_dropout_samples,
+        )
+
+        dynamic_residual_selection = choose_dynamic_residual_usage(
+            y_true=y_selection_orig,
+            gated_only_prediction=dynamic_gated_only_orig["selection"],
+            residual_prediction=dynamic_orig["selection"],
+        )
+        dynamic_residual_selection.update(
+            {
+                "residual_enabled": bool(enable_dynamic_residual),
+                "n_estimators": int(dynamic_residual_n_estimators),
+                "max_depth": int(dynamic_residual_max_depth),
+                "learning_rate": float(dynamic_residual_lr),
+                "subsample": 0.7,
+                "colsample_bytree": 0.8,
+                "reg_lambda": float(dynamic_residual_reg_lambda),
+                "min_child_weight": float(dynamic_residual_min_child_weight),
+            }
+        )
+        if not dynamic_residual_selection["use_residual"]:
+            for split_name in ("selection", "calib", "test", "future_holdout"):
+                dynamic_scaled[split_name] = dynamic_gated_only_scaled[split_name]
+                dynamic_orig[split_name] = dynamic_gated_only_orig[split_name]
 
     metrics_map = {
         "selection": {
-            "Persistence": metrics(y_selection_orig, persistence_for_indices(df, split.idx_selection, target=target)),
             "LSTM": metrics(y_selection_orig, pred_selection_orig["LSTM"]),
             "Transformer": metrics(y_selection_orig, pred_selection_orig["Transformer"]),
             "TCN": metrics(y_selection_orig, pred_selection_orig["TCN"]),
             "Stacking": metrics(y_selection_orig, pred_selection_orig["Stacking"]),
         },
         "test": {
-            "Persistence": metrics(y_test_orig, test_persistence),
             "LSTM": metrics(y_test_orig, pred_test_orig["LSTM"]),
             "Transformer": metrics(y_test_orig, pred_test_orig["Transformer"]),
             "TCN": metrics(y_test_orig, pred_test_orig["TCN"]),
             "Stacking": metrics(y_test_orig, pred_test_orig["Stacking"]),
         },
         "future_holdout": {
-            "Persistence": metrics(y_future_orig, future_persistence),
             "LSTM": metrics(y_future_orig, pred_future_orig["LSTM"]),
             "Transformer": metrics(y_future_orig, pred_future_orig["Transformer"]),
             "TCN": metrics(y_future_orig, pred_future_orig["TCN"]),
             "Stacking": metrics(y_future_orig, pred_future_orig["Stacking"]),
         },
     }
+    if enable_dynamic_gate:
+        metrics_map["selection"][DYNAMIC_MODEL_NAME] = metrics(y_selection_orig, dynamic_orig["selection"])
+        metrics_map["test"][DYNAMIC_MODEL_NAME] = metrics(y_test_orig, dynamic_orig["test"])
+        metrics_map["future_holdout"][DYNAMIC_MODEL_NAME] = metrics(y_future_orig, dynamic_orig["future_holdout"])
 
     pi95_l_test = pi95_u_test = None
     pi95_l_future_holdout = pi95_u_future_holdout = None
@@ -1456,16 +1867,35 @@ def run_well(
 
     os.makedirs(out_dir, exist_ok=True)
     peak_dir = os.path.join(out_dir, "peak")
+    if dynamic_residual_selection is not None:
+        pd.DataFrame([dynamic_residual_selection]).to_csv(
+            os.path.join(out_dir, "dynamic_residual_selection.csv"),
+            index=False,
+        )
+    if enable_dynamic_gate:
+        gate_rows: List[Dict[str, Any]] = []
+        gate_rows.extend(dynamic_gate_weight_rows("selection", split.dates_selection, dynamic_weights["selection"]))
+        gate_rows.extend(dynamic_gate_weight_rows("calib", split.dates_calib, dynamic_weights["calib"]))
+        gate_rows.extend(dynamic_gate_weight_rows("test", split.dates_test, dynamic_weights["test"]))
+        gate_rows.extend(
+            dynamic_gate_weight_rows(
+                "future_holdout",
+                split.dates_future_holdout,
+                dynamic_weights["future_holdout"],
+            )
+        )
+        pd.DataFrame(gate_rows).to_csv(os.path.join(out_dir, "dynamic_gate_weights.csv"), index=False)
     pred_data = {
         "Date": split.dates_test,
         "Actual": y_test_orig,
-        "Persistence": test_persistence,
         "LSTM": pred_test_orig["LSTM"],
         "Transformer": pred_test_orig["Transformer"],
         "TCN": pred_test_orig["TCN"],
         "Stacking": pred_test_orig["Stacking"],
         "Aquifer": aquifer,
     }
+    if enable_dynamic_gate:
+        pred_data[DYNAMIC_MODEL_NAME] = dynamic_orig["test"]
     if enable_intervals:
         pred_data["PI95_Lower"] = pi95_l_test
         pred_data["PI95_Upper"] = pi95_u_test
@@ -1475,13 +1905,14 @@ def run_well(
     future_data = {
         "Date": split.dates_future_holdout,
         "Actual": y_future_orig,
-        "Persistence": future_persistence,
         "LSTM": pred_future_orig["LSTM"],
         "Transformer": pred_future_orig["Transformer"],
         "TCN": pred_future_orig["TCN"],
         "Stacking": pred_future_orig["Stacking"],
         "Aquifer": aquifer,
     }
+    if enable_dynamic_gate:
+        future_data[DYNAMIC_MODEL_NAME] = dynamic_orig["future_holdout"]
     if enable_intervals:
         future_data["PI95_Lower"] = pi95_l_future_holdout
         future_data["PI95_Upper"] = pi95_u_future_holdout
@@ -1491,6 +1922,8 @@ def run_well(
     if enable_peak_analysis and find_peaks is not None:
         os.makedirs(peak_dir, exist_ok=True)
         eval_model_columns = ["LSTM", "Transformer", "TCN", "Stacking"]
+        if enable_dynamic_gate:
+            eval_model_columns.append(DYNAMIC_MODEL_NAME)
         peak_df, peak_details = evaluate_peak_for_models(
             pred_df=pred_df,
             well=aquifer,
@@ -1535,13 +1968,18 @@ def run_well(
     plot_predictions(
         split.dates_test,
         y_test_orig,
-        {
-            "Persistence": test_persistence,
+        ({
             "LSTM": pred_test_orig["LSTM"],
             "Transformer": pred_test_orig["Transformer"],
             "TCN": pred_test_orig["TCN"],
             "Stacking": pred_test_orig["Stacking"],
-        },
+        } | (
+            {
+                DYNAMIC_MODEL_NAME: dynamic_orig["test"],
+            }
+            if enable_dynamic_gate
+            else {}
+        )),
         os.path.join(out_dir, "test_predictions.png"),
         pi95=(pi95_l_test, pi95_u_test) if enable_intervals else None,
     )
@@ -1564,13 +2002,18 @@ def run_well(
     plot_predictions(
         split.dates_future_holdout,
         y_future_orig,
-        {
-            "Persistence": future_persistence,
+        ({
             "LSTM": pred_future_orig["LSTM"],
             "Transformer": pred_future_orig["Transformer"],
             "TCN": pred_future_orig["TCN"],
             "Stacking": pred_future_orig["Stacking"],
-        },
+        } | (
+            {
+                DYNAMIC_MODEL_NAME: dynamic_orig["future_holdout"],
+            }
+            if enable_dynamic_gate
+            else {}
+        )),
         os.path.join(out_dir, "future_holdout_predictions.png"),
         pi95=(pi95_l_future_holdout, pi95_u_future_holdout) if enable_intervals else None,
     )
@@ -1677,7 +2120,26 @@ def main() -> None:
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--patience", type=int, default=10)
     parser.add_argument("--dropout", type=float, default=0.4)
+    parser.add_argument("--tcn_channels", type=parse_tcn_channels, default=parse_tcn_channels(DEFAULT_TCN_CHANNELS))
+    parser.add_argument("--tcn_kernel", type=int, default=DEFAULT_TCN_KERNEL)
+    parser.add_argument("--mc_dropout_samples", type=int, default=30)
+    parser.add_argument("--gate_hidden", type=int, default=16)
+    parser.add_argument("--gate_epochs", type=int, default=80)
+    parser.add_argument("--gate_lr", type=float, default=1e-3)
+    parser.add_argument("--gate_patience", type=int, default=10)
+    parser.add_argument("--dynamic_residual_n_estimators", type=int, default=50)
+    parser.add_argument("--dynamic_residual_max_depth", type=int, default=1)
+    parser.add_argument("--dynamic_residual_lr", type=float, default=0.03)
+    parser.add_argument("--dynamic_residual_reg_lambda", type=float, default=10.0)
+    parser.add_argument("--dynamic_residual_min_child_weight", type=float, default=5.0)
+    parser.set_defaults(enable_dynamic_residual=True)
+    parser.add_argument("--enable_dynamic_residual", dest="enable_dynamic_residual", action="store_true")
+    parser.add_argument("--disable_dynamic_residual", dest="enable_dynamic_residual", action="store_false")
+    parser.set_defaults(enable_dynamic_gate=True)
+    parser.add_argument("--enable_dynamic_gate", dest="enable_dynamic_gate", action="store_true")
+    parser.add_argument("--disable_dynamic_gate", dest="enable_dynamic_gate", action="store_false")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--wells_dir", type=str, default=None)
     parser.add_argument("--out_dir", type=str, default="outputs")
     parser.add_argument("--holdout_steps", type=int, default=30)
     parser.add_argument("--future_steps", type=int, default=None, help=argparse.SUPPRESS)
@@ -1691,7 +2153,7 @@ def main() -> None:
     parser.add_argument("--peak_tolerance", type=int, default=None)
     parser.add_argument("--peak_prominence_scale", type=float, default=None)
     parser.add_argument("--peak_distance_min", type=int, default=1)
-    parser.add_argument("--peak_plot_models", type=str, default="lstm,transformer,tcn,stacking")
+    parser.add_argument("--peak_plot_models", type=str, default="lstm,transformer,tcn,stacking,dynamic")
     parser.add_argument("--shap_bg_samples", type=int, default=80)
     parser.add_argument("--shap_explain_samples", type=int, default=40)
     parser.add_argument("--explain_sample_index", type=int, default=0)
@@ -1706,15 +2168,18 @@ def main() -> None:
 
     set_seed(args.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    wells, well_types = _load_default_wells(args.wells_dir)
+    global WELL_TYPES
+    WELL_TYPES = well_types
 
     all_metrics: Dict[str, Dict[str, Dict[str, Dict[str, float]]]] = {}
     peak_plot_models = [m.strip().lower() for m in args.peak_plot_models.split(",") if m.strip()]
     os.makedirs(args.out_dir, exist_ok=True)
 
-    for file_path, aquifer in WELLS:
+    for file_path, aquifer in wells:
         well_id = aquifer
         out_dir = os.path.join(args.out_dir, aquifer)
-        _, metrics_map = run_well(
+        pred_df, metrics_map = run_well(
             file_path=file_path,
             aquifer=aquifer,
             lookback=args.lookback,
@@ -1744,6 +2209,20 @@ def main() -> None:
             peak_distance_min=args.peak_distance_min,
             peak_plot_models=peak_plot_models,
             dropout=args.dropout,
+            tcn_channels=args.tcn_channels,
+            tcn_kernel=args.tcn_kernel,
+            enable_dynamic_gate=args.enable_dynamic_gate,
+            mc_dropout_samples=args.mc_dropout_samples,
+            gate_hidden=args.gate_hidden,
+            gate_epochs=args.gate_epochs,
+            gate_lr=args.gate_lr,
+            gate_patience=args.gate_patience,
+            enable_dynamic_residual=args.enable_dynamic_residual,
+            dynamic_residual_n_estimators=args.dynamic_residual_n_estimators,
+            dynamic_residual_max_depth=args.dynamic_residual_max_depth,
+            dynamic_residual_lr=args.dynamic_residual_lr,
+            dynamic_residual_reg_lambda=args.dynamic_residual_reg_lambda,
+            dynamic_residual_min_child_weight=args.dynamic_residual_min_child_weight,
         )
         all_metrics[well_id] = metrics_map
 

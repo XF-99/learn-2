@@ -1,175 +1,148 @@
 # 地下水水位预测项目
 
-本项目用于三类地下水含水层的周尺度地下水水位预测：
+本仓库当前只保留 **15 口井 DynamicGatedStacking 探索性筛选实验**。15 口井按含水层类型均衡选择：
 
-- `f`：裂隙水
-- `k`：岩溶水
-- `p`：孔隙水
+- `f`：裂隙水，5 口井
+- `k`：岩溶水，5 口井
+- `p`：孔隙水，5 口井
 
-当前版本共使用 9 口井，每类地下水 3 口井。所有井的数据已经统一到相同的周时间跨度，便于按地下水类型计算平均指标并进行对比。
+当前结果是探索性筛选结果，不作为独立无偏泛化结论。筛选和复现判断均只关注 `test` split，`future_holdout` 不参与当前模型选择结论。
 
-## 当前数据集
+## 当前数据
 
-主程序默认读取以下目录中的 9 井周数据：
-
-```text
-selected_weekly_data_9wells_common/
-```
-
-9 口井统一后的时间范围为：
+15 口井周尺度数据位于：
 
 ```text
-1969-01-13 至 2016-01-18
+test/selected_weekly_data_15wells_current/
 ```
 
-每口井均有 2454 条周数据，字段顺序一致：
+每口井使用自己的可用时间跨度，不强制统一起止日期。数据字段为：
 
 ```text
 Date,TASMAX,TAS,TASMIN,Humidity,Precipitation,GWL
 ```
 
-9 口井清单记录在：
+井清单、候选记录和筛选日志：
 
 ```text
-selected_weekly_data_9wells_common/nine_wells_summary.csv
+test/selected_weekly_data_15wells_current/selected_wells_summary.csv
+test/selected_weekly_data_15wells_current/candidate_wells_ranked.csv
+test/RUN_LOG.md
+test/attempts_summary.csv
 ```
 
-仓库中已移除旧版 3 井数据集和根目录类型级周数据文件；当前训练主程序只使用 `selected_weekly_data_9wells_common/` 中的 9 井共同时间跨度数据。
+## 模型
 
-## 模型流程
+当前保留并输出的模型为：
 
-`learn.py` 使用严格的时间序列划分：
-
-```text
-train -> val -> selection -> calib -> test -> future_holdout
-```
-
-各数据段用途如下：
-
-- `train`：训练神经网络模型。
-- `val`：用于早停，并训练 stacking 残差模型。
-- `selection`：只用于 lookback 和 dropout 等超参数选择。
-- `calib`：只用于 conformal 区间预测校准。
-- `test`：历史测试集最终评估。
-- `future_holdout`：最后 30 周，模拟未来预测，只使用真实气象变量，GWL 递推预测。
-
-模型输入特征为：
-
-```text
-GWL,TASMAX,TAS,TASMIN,Humidity,Precipitation
-```
-
-对比模型包括：
-
-- Persistence 基线模型
 - LSTM
 - Transformer
 - TCN
-- XGBoost 残差 Stacking
+- Stacking
+- DynamicGatedStacking
 
-在 `future_holdout` 中，模型和 Persistence 基线都采用递推口径。第一周使用 holdout 前最后一周真实 GWL，之后每一步使用上一周预测 GWL 继续递推。
-
-## 最终参数
-
-当前最终默认参数为：
-
-```text
-lookback = 18
-dropout = 0.4
-batch_size = 128
-holdout_steps = 30
-selection_ratio = 0.1
-calib_ratio = 0.15
-```
-
-这些超参数来自 `selection` 数据段上的实验结果，没有使用 `test` 或 `future_holdout` 选择参数，因此不会污染最终测试集。
+实验输出中不保留 `Persistence`、`DynamicGatedOnly`、`AdaptiveWeightedStacking`。`DynamicGatedStacking` 使用 MC Dropout 深度模型预测、动态门控融合和弱 XGBoost 残差修正，并在 selection split 上判断残差是否启用。
 
 ## 运行方式
 
-完整运行，包含区间预测、SHAP 解释和峰值分析：
+15 井点预测入口：
 
 ```powershell
-python learn.py --out_dir outputs
+C:\Users\xf-99\.conda\envs\Python39\python.exe test\run_15wells_test_focus.py
 ```
 
-只跑基础预测，不跑区间预测、SHAP 和峰值分析：
+15 井区间预测入口：
 
 ```powershell
-python learn.py --out_dir outputs_basic --disable_intervals --disable_explain --disable_peak_analysis --batch_size 128
+C:\Users\xf-99\.conda\envs\Python39\python.exe test\run_15wells_interval_focus.py
 ```
 
-运行 lookback 超参数实验：
+15 井 SHAP 和峰值分析入口：
 
 ```powershell
-python lookback_experiment.py --batch_size 128
+C:\Users\xf-99\.conda\envs\Python39\python.exe test\run_15wells_shap_focus.py
+C:\Users\xf-99\.conda\envs\Python39\python.exe test\run_15wells_peak_focus.py
 ```
 
-运行 dropout 超参数实验：
+所有 15 井入口都会检查 GPU；如果 `torch.cuda.is_available()` 为 false，会直接停止。
 
-```powershell
-python dropout_experiment.py --lookback 18 --batch_size 128
-```
+## 当前输出
 
-## 输出结果
-
-当前 GitHub 中已提交的最终结果位于：
+当前保留的正式 15 井区间预测输出：
 
 ```text
-outputs/
+test/outputs_15wells_interval_focus/
 ```
 
-根目录输出包括：
+核心汇总文件：
 
 ```text
 metrics_summary.csv
-metrics_summary.json
 metrics_by_type_summary.csv
 rmse_comparison.png
 nse_comparison.png
-peak_metrics_summary.csv
+reproducible_selection/
 ```
 
-每口井目录中包括：
+`test` split 上 15 口井平均指标如下：
+
+| 模型 | RMSE | NSE | PICP95 | MPIW95 |
+| --- | ---: | ---: | ---: | ---: |
+| DynamicGatedStacking | 0.1853 | 0.9210 | 0.9518 | 0.7622 |
+| Transformer | 0.1891 | 0.9195 | 0.9600 | 0.8173 |
+| LSTM | 0.1927 | 0.9127 | 0.9496 | 0.8098 |
+| TCN | 0.2078 | 0.9023 | 0.9562 | 0.8466 |
+
+按类型看，DynamicGatedStacking 在岩溶水平均 RMSE 最优；孔隙水和裂隙水上 Transformer 略优，但 15 口井整体平均 RMSE 仍由 DynamicGatedStacking 最低。
+
+## 可重复性分析
+
+`reproducible_model_selection.py` 使用 test 逐点 squared loss、block bootstrap 和成对概率 `P(R_A < R_B)`，构造 paper-inspired R-distribution 风险分布。默认只分析 `test`，并排除 `Persistence`、`Stacking`、`DynamicGatedOnly`、`AdaptiveWeightedStacking`。
+
+推荐命令：
+
+```powershell
+C:\Users\xf-99\.conda\envs\Python39\python.exe reproducible_model_selection.py --out_dir test\outputs_15wells_interval_focus --splits test --bootstrap_method block --block_size 8 --bootstrap_samples 5000 --seed 42 --target_model DynamicGatedStacking
+```
+
+输出目录：
 
 ```text
-test_predictions.csv
-future_holdout_predictions.csv
-test_predictions.png
-future_holdout_predictions.png
-stacking_residuals.png
-time_frequency.png
-explain/
-peak/
+test/outputs_15wells_interval_focus/reproducible_selection/
 ```
 
-预测 CSV 中包含 95% 区间预测列：
+主要输出包括：
 
 ```text
-PI95_Lower,PI95_Upper
+loss_quantile_functions.csv
+risk_distribution_samples.csv
+risk_distribution_summary.csv
+pairwise_reproducible_dominance.csv
+stable_model_rejections.csv
+model_reproducibility_ranking.csv
+dynamic_gated_reproducibility_report.md
+risk_distribution_plot_test.png
+pairwise_probability_heatmap_test.png
 ```
 
-`explain/` 目录中包含 Transformer attention 和 SHAP 图。`peak/` 目录中包含峰值识别图和峰值指标。
-
-超参数实验结果位于：
-
-```text
-outputs_9wells_lookback/
-outputs_9wells_dropout/
-```
+当前复现分析显示：DynamicGatedStacking 的平均 empirical risk 最低；对 LSTM 和 TCN 是趋势优势，对 Transformer 的优势不稳定，因此只写作探索性筛选优势，不写作稳定显著优于。
 
 ## 验证
 
-数据流测试覆盖严格时序划分、训练集 scaler 拟合、future holdout 气象变量对齐、递推预测和 Persistence baseline：
+编译检查：
 
 ```powershell
-python test_learn_data_flow.py
+python -m py_compile learn.py reproducible_model_selection.py test\learn.py test\prepare_15wells.py test\run_15wells_test_focus.py test\run_15wells_interval_focus.py test\optimize_15wells_dynamic_gate.py validate_selected_weekly_data.py
 ```
 
-最终完整运行已经检查：
+单元测试：
 
-- 共 9 个井输出目录。
-- `metrics_summary.csv` 共 90 行。
-- `metrics_by_type_summary.csv` 共 30 行。
-- `test` 和 `future_holdout` 都包含 5 个模型。
-- 每个 `future_holdout_predictions.csv` 正好 30 行。
-- 区间预测、SHAP 解释和峰值分析文件均已生成。
+```powershell
+python -m unittest test_learn_data_flow.py test_reproducible_model_selection.py
+```
+
+数据检查：
+
+```powershell
+python validate_selected_weekly_data.py
+```
