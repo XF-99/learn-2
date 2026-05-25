@@ -51,8 +51,6 @@ Date,TASMAX,TAS,TASMIN,Humidity,Precipitation,GWL
 ```text
 test/selected_weekly_data_15wells_current/selected_wells_summary.csv
 test/selected_weekly_data_15wells_current/candidate_wells_ranked.csv
-test/RUN_LOG.md
-test/attempts_summary.csv
 ```
 
 ## 当前模型

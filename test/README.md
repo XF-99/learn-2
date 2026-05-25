@@ -22,8 +22,6 @@
 | `selected_weekly_data_15wells_current/` | 当前固定 15 口井周尺度数据。 |
 | `outputs_15wells_interval_focus/` | 当前保留的 15 口井区间预测输出。 |
 | `outputs_15wells_interval_focus/reproducible_selection/` | 可重复性分析输出。 |
-| `RUN_LOG.md` | 人工可读实验日志。 |
-| `attempts_summary.csv` | 所有筛选 attempt 的完整机器可读摘要。 |
 | `confirm_summary.csv` | 固定 15 口井后的 confirm seed 结果。 |
 | `confirm_model_summary.csv` | confirm run 的模型平均表现。 |
 

@@ -5,11 +5,12 @@
 ### 结构整理
 
 - 根目录只保留项目级说明文件：`README.md`、`CHANGELOG.md`、`.gitignore`。
-- 15 口井实验相关运行代码、数据、输出和日志全部集中到 `test/` 目录。
+- 15 口井实验相关运行代码、数据和输出全部集中到 `test/` 目录。
 - 删除根目录重复的 `learn.py`、`vendor_bootstrap.py`。
 - 将可重复性分析脚本移动到 `test/`。
 - 删除不再需要的数据准备、筛选优化、数据校验和单元测试脚本。
-- `RUN_LOG.md`、README 和可重复性报告改为中文说明。
+- 删除不再需要的筛选过程日志 `RUN_LOG.md` 和 `attempts_summary.csv`。
+- README、test 目录说明和可重复性报告改为中文说明。
 
 ### 当前实验主线
 
