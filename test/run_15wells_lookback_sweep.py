@@ -19,7 +19,7 @@ import pandas as pd
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 PYTHON_EXE = Path(r"C:\Users\xf-99\.conda\envs\Python39\python.exe")
-REMOVED_MODELS = {"Persistence", "DynamicGatedOnly", "AdaptiveWeightedStacking"}
+REMOVED_MODELS = {"Persistence", "Stacking", "DynamicGatedOnly", "AdaptiveWeightedStacking"}
 
 
 def parse_lookbacks(raw: str) -> list[int]:

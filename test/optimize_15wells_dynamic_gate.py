@@ -37,7 +37,7 @@ from prepare_15wells import (
 SCRIPT_DIR = Path(__file__).resolve().parent
 PYTHON_EXE = Path(r"C:\Users\xf-99\.conda\envs\Python39\python.exe")
 MODEL_NAMES = ["LSTM", "Transformer", "TCN", "DynamicGatedStacking"]
-REMOVED_MODELS = ["Persistence", "DynamicGatedOnly", "AdaptiveWeightedStacking"]
+REMOVED_MODELS = ["Persistence", "Stacking", "DynamicGatedOnly", "AdaptiveWeightedStacking"]
 ATTEMPTS_CSV = SCRIPT_DIR / "attempts_summary.csv"
 RUN_LOG = SCRIPT_DIR / "RUN_LOG.md"
 BEST_DIR = SCRIPT_DIR / "outputs_15wells_test_focus_best"

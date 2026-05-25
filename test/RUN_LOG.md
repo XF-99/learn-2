@@ -1,76 +1,77 @@
-# 15-well DynamicGatedStacking exploratory screening
+# 15 口井 DynamicGatedStacking 探索性筛选日志
 
-- Nature: exploratory screening, not an independent unbiased test conclusion.
-- Goal: find a 15-well f/k/p=5/5/5 set where DynamicGatedStacking has the best test mean RMSE.
-- Failed heavy output directories may be deleted after their summaries are recorded.
+本日志记录 15 口井筛选实验的关键过程。完整逐轮记录保存在 `attempts_summary.csv`，这里保留人工可读摘要。
 
-## Candidate source
-- Candidate pool uses curated f/k/p wells from the project history and Desktop data files.
+## 实验性质
 
-## Attempt 1 (screen, seed=42)
-- Best model: Transformer, best RMSE=0.220842
-- DynamicGatedStacking: RMSE=0.232687, NSE=0.926181, rank=2
-- Output deleted: False
-- Wells: f:HE_6253(1952-02-11..2018-01-29, weeks=3443); f:HE_12117(1960-09-26..2018-01-22, weeks=2992); f:HE_7824(1962-02-26..2016-01-18, weeks=2813); f:NW_100140762(1970-02-23..2017-09-18, weeks=2483); f:SN_52410759(1970-11-09..2017-11-13, weeks=2454); k:BY_11119(1955-12-19..2017-12-18, weeks=3236); k:BY_7126(1961-11-13..2017-12-18, weeks=2928); k:BY_15120(1967-07-10..2017-07-10, weeks=2610); k:BW_103-763-0(1977-12-19..2016-12-19, weeks=2036); k:NW_91163705(1979-11-12..2017-09-04, weeks=1974); p:SN_46460564(1951-01-08..2017-11-13, weeks=3489); p:NW_80000186(1951-01-08..2017-10-02, weeks=3483); p:RP_2378140100(1954-12-27..2018-01-22, weeks=3292); p:BB_32455305(1958-06-23..2018-05-14, weeks=3126); p:NW_100140142(1958-12-08..2017-09-04, weeks=3066)
+- 实验性质：探索性筛选实验，不作为独立无偏测试结论。
+- 目标：在裂隙水、岩溶水、孔隙水各 5 口井的前提下，让 `DynamicGatedStacking` 在 `test` 平均 RMSE 上成为最优模型。
+- 当前只用 `test` 判断筛选结果；`future_holdout` 不参与当前结论。
+- 失败 attempt 的大体量输出可以删除，但必须先写入 `attempts_summary.csv` 和本日志。
 
-## Attempt 1 (replacement_decision, seed=42)
-- Best model: Transformer, best RMSE=0.220842
-- DynamicGatedStacking: RMSE=0.232687, NSE=0.926181, rank=2
-- Output deleted: True
-- Wells: f:HE_6253(1952-02-11..2018-01-29, weeks=3443); f:HE_12117(1960-09-26..2018-01-22, weeks=2992); f:HE_7824(1962-02-26..2016-01-18, weeks=2813); f:NW_100140762(1970-02-23..2017-09-18, weeks=2483); f:SN_52410759(1970-11-09..2017-11-13, weeks=2454); k:BY_11119(1955-12-19..2017-12-18, weeks=3236); k:BY_7126(1961-11-13..2017-12-18, weeks=2928); k:BY_15120(1967-07-10..2017-07-10, weeks=2610); k:BW_103-763-0(1977-12-19..2016-12-19, weeks=2036); k:NW_91163705(1979-11-12..2017-09-04, weeks=1974); p:SN_46460564(1951-01-08..2017-11-13, weeks=3489); p:NW_80000186(1951-01-08..2017-10-02, weeks=3483); p:RP_2378140100(1954-12-27..2018-01-22, weeks=3292); p:BB_32455305(1958-06-23..2018-05-14, weeks=3126); p:NW_100140142(1958-12-08..2017-09-04, weeks=3066)
-- Replacement: k/岩溶水 BW_103-763-0 -> BW_100-813-7; reason=type_dragging: 岩溶水 DynamicGatedStacking RMSE > 1.5x type mean
+## 候选来源
 
-- Deleted failed output after recording summary: outputs_attempt_1_seed_42
+- 候选井来自项目历史使用过的井和桌面原始数据文件。
+- 类型映射：`f` 为裂隙水，`k` 为岩溶水，`p` 为孔隙水。
+- 当前固定组合为 15 口井，每类 5 口。
 
-## Attempt 2 (screen, seed=43)
-- Best model: Transformer, best RMSE=0.207067
-- DynamicGatedStacking: RMSE=0.217332, NSE=0.916113, rank=2
-- Output deleted: False
-- Wells: f:HE_6253(1952-02-11..2018-01-29, weeks=3443); f:HE_12117(1960-09-26..2018-01-22, weeks=2992); f:HE_7824(1962-02-26..2016-01-18, weeks=2813); f:NW_100140762(1970-02-23..2017-09-18, weeks=2483); f:SN_52410759(1970-11-09..2017-11-13, weeks=2454); k:BY_11119(1955-12-19..2017-12-18, weeks=3236); k:BY_7126(1961-11-13..2017-12-18, weeks=2928); k:BY_15120(1967-07-10..2017-07-10, weeks=2610); k:BW_100-813-7(1979-05-14..2016-12-19, weeks=1963); k:NW_91163705(1979-11-12..2017-09-04, weeks=1974); p:SN_46460564(1951-01-08..2017-11-13, weeks=3489); p:NW_80000186(1951-01-08..2017-10-02, weeks=3483); p:RP_2378140100(1954-12-27..2018-01-22, weeks=3292); p:BB_32455305(1958-06-23..2018-05-14, weeks=3126); p:NW_100140142(1958-12-08..2017-09-04, weeks=3066)
+## 当前固定 15 口井
 
-## Attempt 2 (replacement_decision, seed=43)
-- Best model: Transformer, best RMSE=0.207067
-- DynamicGatedStacking: RMSE=0.217332, NSE=0.916113, rank=2
-- Output deleted: True
-- Wells: f:HE_6253(1952-02-11..2018-01-29, weeks=3443); f:HE_12117(1960-09-26..2018-01-22, weeks=2992); f:HE_7824(1962-02-26..2016-01-18, weeks=2813); f:NW_100140762(1970-02-23..2017-09-18, weeks=2483); f:SN_52410759(1970-11-09..2017-11-13, weeks=2454); k:BY_11119(1955-12-19..2017-12-18, weeks=3236); k:BY_7126(1961-11-13..2017-12-18, weeks=2928); k:BY_15120(1967-07-10..2017-07-10, weeks=2610); k:BW_100-813-7(1979-05-14..2016-12-19, weeks=1963); k:NW_91163705(1979-11-12..2017-09-04, weeks=1974); p:SN_46460564(1951-01-08..2017-11-13, weeks=3489); p:NW_80000186(1951-01-08..2017-10-02, weeks=3483); p:RP_2378140100(1954-12-27..2018-01-22, weeks=3292); p:BB_32455305(1958-06-23..2018-05-14, weeks=3126); p:NW_100140142(1958-12-08..2017-09-04, weeks=3066)
-- Replacement: k/岩溶水 NW_91163705 -> NW_91174909; reason=type_dragging: 岩溶水 DynamicGatedStacking RMSE > 1.5x type mean
+| 类型 | 井号 | 名称 | 时间范围 | 周数 |
+| --- | --- | --- | --- | ---: |
+| 裂隙水 | HE_6253 | NETRA | 1952-02-11 至 2018-01-29 | 3443 |
+| 裂隙水 | HE_12117 | HE_12117 | 1960-09-26 至 2018-01-22 | 2992 |
+| 裂隙水 | HE_7824 | HE_7824 | 1962-02-26 至 2016-01-18 | 2813 |
+| 裂隙水 | NW_100140762 | WG 70 TAPPENAU | 1970-02-23 至 2017-09-18 | 2483 |
+| 裂隙水 | SN_52410759 | Muelsen-St-Niclas | 1970-11-09 至 2017-11-13 | 2454 |
+| 岩溶水 | BY_11119 | BY_11119 | 1955-12-19 至 2017-12-18 | 3236 |
+| 岩溶水 | BY_7126 | BY_7126 | 1961-11-13 至 2017-12-18 | 2928 |
+| 岩溶水 | BY_15120 | IHRLERSTEIN TIEF K1 | 1967-07-10 至 2017-07-10 | 2610 |
+| 岩溶水 | BW_100-813-7 | GIENGEN TAUBENTAL | 1979-05-14 至 2016-12-19 | 1963 |
+| 岩溶水 | NW_91174909 | Brilon LederkeOL748 | 1988-02-15 至 2017-06-05 | 1530 |
+| 孔隙水 | SN_46460564 | Walda | 1951-01-08 至 2017-11-13 | 3489 |
+| 孔隙水 | NW_80000186 | OEDT Nr020 | 1951-01-08 至 2017-10-02 | 3483 |
+| 孔隙水 | RP_2378140100 | 1057 Boebingen | 1954-12-27 至 2018-01-22 | 3292 |
+| 孔隙水 | BB_32455305 | Hohenbruch, Weg n.Teerofen | 1958-06-23 至 2018-05-14 | 3126 |
+| 孔隙水 | NW_100140142 | WG 22 LEVKENSTAD | 1958-12-08 至 2017-09-04 | 3066 |
 
-- Deleted failed output after recording summary: outputs_attempt_2_seed_43
+## 筛选 attempt 摘要
 
-## Attempt 3 (screen, seed=44)
-- Best model: Transformer, best RMSE=0.182286
-- DynamicGatedStacking: RMSE=0.182731, NSE=0.920999, rank=2
-- Output deleted: False
-- Wells: f:HE_6253(1952-02-11..2018-01-29, weeks=3443); f:HE_12117(1960-09-26..2018-01-22, weeks=2992); f:HE_7824(1962-02-26..2016-01-18, weeks=2813); f:NW_100140762(1970-02-23..2017-09-18, weeks=2483); f:SN_52410759(1970-11-09..2017-11-13, weeks=2454); k:BY_11119(1955-12-19..2017-12-18, weeks=3236); k:BY_7126(1961-11-13..2017-12-18, weeks=2928); k:BY_15120(1967-07-10..2017-07-10, weeks=2610); k:BW_100-813-7(1979-05-14..2016-12-19, weeks=1963); k:NW_91174909(1988-02-15..2017-06-05, weeks=1530); p:SN_46460564(1951-01-08..2017-11-13, weeks=3489); p:NW_80000186(1951-01-08..2017-10-02, weeks=3483); p:RP_2378140100(1954-12-27..2018-01-22, weeks=3292); p:BB_32455305(1958-06-23..2018-05-14, weeks=3126); p:NW_100140142(1958-12-08..2017-09-04, weeks=3066)
+| attempt | 阶段 | seed | 最优模型 | 最优 RMSE | DGS RMSE | DGS NSE | DGS 排名 | 输出是否删除 |
+| ---: | --- | ---: | --- | ---: | ---: | ---: | ---: | --- |
+| 1 | screen | 42 | Transformer | 0.220842 | 0.232687 | 0.926181 | 2 | 是 |
+| 2 | screen | 43 | Transformer | 0.207067 | 0.217332 | 0.916113 | 2 | 是 |
+| 3 | screen | 44 | Transformer | 0.182286 | 0.182731 | 0.920999 | 2 | 是 |
+| 4 | screen | 45 | DynamicGatedStacking | 0.178543 | 0.178543 | 0.923858 | 1 | 否 |
 
-## Attempt 4 (screen, seed=45)
-- Best model: DynamicGatedStacking, best RMSE=0.178543
-- DynamicGatedStacking: RMSE=0.178543, NSE=0.923858, rank=1
-- Output deleted: False
-- Wells: f:HE_6253(1952-02-11..2018-01-29, weeks=3443); f:HE_12117(1960-09-26..2018-01-22, weeks=2992); f:HE_7824(1962-02-26..2016-01-18, weeks=2813); f:NW_100140762(1970-02-23..2017-09-18, weeks=2483); f:SN_52410759(1970-11-09..2017-11-13, weeks=2454); k:BY_11119(1955-12-19..2017-12-18, weeks=3236); k:BY_7126(1961-11-13..2017-12-18, weeks=2928); k:BY_15120(1967-07-10..2017-07-10, weeks=2610); k:BW_100-813-7(1979-05-14..2016-12-19, weeks=1963); k:NW_91174909(1988-02-15..2017-06-05, weeks=1530); p:SN_46460564(1951-01-08..2017-11-13, weeks=3489); p:NW_80000186(1951-01-08..2017-10-02, weeks=3483); p:RP_2378140100(1954-12-27..2018-01-22, weeks=3292); p:BB_32455305(1958-06-23..2018-05-14, weeks=3126); p:NW_100140142(1958-12-08..2017-09-04, weeks=3066)
+## 换井记录
 
-## Attempt 5 (confirm, seed=46)
-- Best model: DynamicGatedStacking, best RMSE=0.178078
-- DynamicGatedStacking: RMSE=0.178078, NSE=0.923279, rank=1
-- Output deleted: True
-- Wells: f:HE_6253(1952-02-11..2018-01-29, weeks=3443); f:HE_12117(1960-09-26..2018-01-22, weeks=2992); f:HE_7824(1962-02-26..2016-01-18, weeks=2813); f:NW_100140762(1970-02-23..2017-09-18, weeks=2483); f:SN_52410759(1970-11-09..2017-11-13, weeks=2454); k:BY_11119(1955-12-19..2017-12-18, weeks=3236); k:BY_7126(1961-11-13..2017-12-18, weeks=2928); k:BY_15120(1967-07-10..2017-07-10, weeks=2610); k:BW_100-813-7(1979-05-14..2016-12-19, weeks=1963); k:NW_91174909(1988-02-15..2017-06-05, weeks=1530); p:SN_46460564(1951-01-08..2017-11-13, weeks=3489); p:NW_80000186(1951-01-08..2017-10-02, weeks=3483); p:RP_2378140100(1954-12-27..2018-01-22, weeks=3292); p:BB_32455305(1958-06-23..2018-05-14, weeks=3126); p:NW_100140142(1958-12-08..2017-09-04, weeks=3066)
+| attempt | 类型 | replaced_well | new_well | 原因 | 替换前周数 | 替换后周数 |
+| ---: | --- | --- | --- | --- | ---: | ---: |
+| 1 | 岩溶水 | BW_103-763-0 | BW_100-813-7 | 岩溶水 DGS 平均 RMSE 高于三类型平均的 1.5 倍 | 2036 | 1963 |
+| 2 | 岩溶水 | NW_91163705 | NW_91174909 | 岩溶水 DGS 平均 RMSE 高于三类型平均的 1.5 倍 | 1974 | 1530 |
 
-## Attempt 6 (confirm, seed=47)
-- Best model: Transformer, best RMSE=0.182183
-- DynamicGatedStacking: RMSE=0.187282, NSE=0.917373, rank=2
-- Output deleted: True
-- Wells: f:HE_6253(1952-02-11..2018-01-29, weeks=3443); f:HE_12117(1960-09-26..2018-01-22, weeks=2992); f:HE_7824(1962-02-26..2016-01-18, weeks=2813); f:NW_100140762(1970-02-23..2017-09-18, weeks=2483); f:SN_52410759(1970-11-09..2017-11-13, weeks=2454); k:BY_11119(1955-12-19..2017-12-18, weeks=3236); k:BY_7126(1961-11-13..2017-12-18, weeks=2928); k:BY_15120(1967-07-10..2017-07-10, weeks=2610); k:BW_100-813-7(1979-05-14..2016-12-19, weeks=1963); k:NW_91174909(1988-02-15..2017-06-05, weeks=1530); p:SN_46460564(1951-01-08..2017-11-13, weeks=3489); p:NW_80000186(1951-01-08..2017-10-02, weeks=3483); p:RP_2378140100(1954-12-27..2018-01-22, weeks=3292); p:BB_32455305(1958-06-23..2018-05-14, weeks=3126); p:NW_100140142(1958-12-08..2017-09-04, weeks=3066)
+## 固定组合 confirm run
 
+找到 DGS 最优组合后，固定上述 15 口井，继续做多 seed confirm run。confirm 使用 seed 45 至 54，共 10 轮。
 
-## Manual confirm completion after interruption
-- User clarified selection should use test only; future_holdout is ignored.
-- Fixed the found 15-well set and ran confirm seeds through 54.
-- Deleted failed/confirm heavy output directories after writing attempts_summary.csv and confirm summaries.
-- Confirm overall: {"confirm_seed_count": 10, "seed_min": 45, "seed_max": 54, "dynamic_mean_rmse": 0.18123577797908702, "dynamic_std_rmse": 0.0032644994877876195, "dynamic_mean_rank": 1.4, "dynamic_rank1_count": 7, "mean_best_model_by_rmse": "DynamicGatedStacking", "screening_note": "exploratory screening, not an independent unbiased test conclusion", "selection_split_used": "test only; future_holdout ignored"}
-- Final confirm mean best model is DynamicGatedStacking.
+| 模型 | confirm 平均 RMSE | RMSE 标准差 | confirm 平均 NSE |
+| --- | ---: | ---: | ---: |
+| DynamicGatedStacking | 0.181236 | 0.003441 | 0.921621 |
+| Transformer | 0.184967 | 0.004157 | 0.918762 |
+| LSTM | 0.185066 | 0.002910 | 0.917578 |
+| TCN | 0.200959 | 0.002993 | 0.906816 |
 
-## GitHub mainline replacement on 2026-05-25
-- User requested replacing the previous 9-well GitHub mainline with this 15-well experiment.
-- Scope for sync: `test/` 15-well code, selected weekly data, interval outputs, reproducibility outputs, screening logs, root `learn.py`, README, CHANGELOG, and validation/test scripts.
-- Previous non-current data and output directories are removed from the mainline; this repository now keeps only the current 15-well experiment outputs.
-- Current conclusion remains exploratory screening only. Selection and reproducibility analysis use test split only; future_holdout is not used for the current model-selection conclusion.
+confirm 结论：
+
+- `DynamicGatedStacking` 的 confirm 平均 RMSE 最低。
+- `DynamicGatedStacking` 平均排名为 1.4。
+- 10 个 confirm seed 中，`DynamicGatedStacking` 排名第一 7 次。
+- 结论仍为探索性筛选结论，不写作独立无偏泛化结论。
+
+## GitHub 主线整理记录
+
+- 2026-05-25 已将 GitHub 主线整理为当前 15 口井实验。
+- 旧实验主线、早期 dropout/lookback 输出和无关旧输出已从主线删除。
+- 15 口井实验代码、数据、输出、日志和可重复性分析结果已集中到 `test/`。
+- 根目录只保留项目级说明文件，避免代码分散。

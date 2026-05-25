@@ -11,7 +11,7 @@ from pandas.api.types import is_numeric_dtype
 
 
 WORKSPACE = Path(__file__).resolve().parent
-DEFAULT_SELECTED_OUT_DIR = WORKSPACE / "test" / "selected_weekly_data_15wells_current"
+DEFAULT_SELECTED_OUT_DIR = WORKSPACE / "selected_weekly_data_15wells_current"
 FIELD_ORDER = ["Date", "TASMAX", "TAS", "TASMIN", "Humidity", "Precipitation", "GWL"]
 SUMMARY_NAME = "selected_wells_summary.csv"
 COMBINED_NAME = "selected_wells_combined_long.csv"

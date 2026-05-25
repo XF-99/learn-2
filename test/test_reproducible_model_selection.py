@@ -1,10 +1,15 @@
 import argparse
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+
+THIS_DIR = Path(__file__).resolve().parent
+if str(THIS_DIR) not in sys.path:
+    sys.path.insert(0, str(THIS_DIR))
 
 import reproducible_model_selection as rms
 

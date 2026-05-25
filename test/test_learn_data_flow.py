@@ -1,9 +1,15 @@
+import sys
 import unittest
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
+
+THIS_DIR = Path(__file__).resolve().parent
+if str(THIS_DIR) not in sys.path:
+    sys.path.insert(0, str(THIS_DIR))
 
 import learn
 import reproducible_model_selection as rms
@@ -119,11 +125,6 @@ class TCNConfigurationTests(unittest.TestCase):
         self.assertEqual(channels, [32, 32, 32, 32])
         self.assertEqual(receptive_field, 31)
         self.assertGreaterEqual(receptive_field, 18)
-
-    def test_stacking_xgb_uses_requested_seed(self):
-        xgb = learn.create_stacking_xgb(seed=123)
-
-        self.assertEqual(xgb.get_params()["random_state"], 123)
 
     def test_dynamic_residual_xgb_uses_requested_seed_and_weak_defaults(self):
         xgb = learn.create_dynamic_residual_xgb(seed=123)
