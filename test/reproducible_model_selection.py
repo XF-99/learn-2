@@ -26,6 +26,7 @@ DEFAULT_EXCLUDE_MODELS = [
     "AdaptiveWeightedStacking",
 ]
 RESULT_DIR_NAME = "reproducible_selection"
+MULTISEED_PREDICTION_FILE = "multiseed_test_predictions_long.csv"
 
 
 @dataclass(frozen=True)
@@ -196,7 +197,44 @@ def _scenario_aquifer(frame):
     return ""
 
 
+def _load_multiseed_scenarios(out_dir, splits, models=None, exclude_models=None):
+    prediction_path = Path(out_dir) / MULTISEED_PREDICTION_FILE
+    if not prediction_path.exists():
+        return None
+    if any(split != "test" for split in splits):
+        raise ValueError("Multiseed long predictions currently support only the test split.")
+    frame = pd.read_csv(prediction_path)
+    required = {"seed", "well", "Actual"}
+    missing = sorted(required - set(frame.columns))
+    if missing:
+        raise ValueError(f"{prediction_path} is missing required column(s): {', '.join(missing)}")
+    if models is None:
+        models = selected_models(available_columns=frame.columns, exclude_models=exclude_models)
+    if not models:
+        raise ValueError("No analyzable model prediction columns were found in multiseed predictions.")
+    validate_prediction_columns(frame, models)
+
+    scenarios = []
+    for (seed, well), scenario_frame in frame.groupby(["seed", "well"], sort=True):
+        scenario_frame = scenario_frame.copy()
+        scenarios.append(
+            {
+                "split": "test",
+                "well": str(well),
+                "seed": int(seed),
+                "scenario_id": f"seed_{int(seed)}:{well}",
+                "aquifer": _scenario_aquifer(scenario_frame),
+                "frame": scenario_frame,
+                "path": prediction_path,
+            }
+        )
+    return scenarios, list(models)
+
+
 def _load_scenarios(out_dir, splits, models=None, exclude_models=None):
+    multiseed = _load_multiseed_scenarios(out_dir, splits, models=models, exclude_models=exclude_models)
+    if multiseed is not None:
+        return multiseed
     scenarios = []
     for well_dir in _well_directories(out_dir):
         for split in splits:
@@ -237,6 +275,8 @@ def _loss_quantile_rows(scenario, model, point_loss, quantile_grid_size):
             {
                 "split": scenario["split"],
                 "well": scenario["well"],
+                "seed": scenario.get("seed", ""),
+                "scenario_id": scenario.get("scenario_id", scenario["well"]),
                 "aquifer": scenario["aquifer"],
                 "model": model,
                 "quantile": float(level),
@@ -290,6 +330,8 @@ def _compute_scenario_records(
                     {
                         "split": scenario["split"],
                         "well": scenario["well"],
+                        "seed": scenario.get("seed", ""),
+                        "scenario_id": scenario.get("scenario_id", scenario["well"]),
                         "aquifer": scenario["aquifer"],
                         "model": model,
                         "sample_index": int(sample_index),
@@ -300,6 +342,8 @@ def _compute_scenario_records(
             {
                 "split": scenario["split"],
                 "well": scenario["well"],
+                "seed": scenario.get("seed", ""),
+                "scenario_id": scenario.get("scenario_id", scenario["well"]),
                 "aquifer": scenario["aquifer"],
                 "model": model,
                 "loss": loss,
@@ -323,6 +367,8 @@ def _compute_scenario_records(
                 {
                     "split": scenario["split"],
                     "well": scenario["well"],
+                    "seed": scenario.get("seed", ""),
+                    "scenario_id": scenario.get("scenario_id", scenario["well"]),
                     "aquifer": scenario["aquifer"],
                     "model_a": model_a,
                     "model_b": model_b,
@@ -340,6 +386,8 @@ def _compute_scenario_records(
                 {
                     "split": scenario["split"],
                     "well": scenario["well"],
+                    "seed": scenario.get("seed", ""),
+                    "scenario_id": scenario.get("scenario_id", scenario["well"]),
                     "aquifer": scenario["aquifer"],
                     "model_a": model_b,
                     "model_b": model_a,
@@ -360,6 +408,8 @@ def build_stable_rejections(pairwise, dominance_threshold):
     columns = [
         "split",
         "well",
+        "seed",
+        "scenario_id",
         "aquifer",
         "rejected_model",
         "dominating_model",
@@ -376,6 +426,8 @@ def build_stable_rejections(pairwise, dominance_threshold):
             {
                 "split": row["split"],
                 "well": row["well"],
+                "seed": row.get("seed", ""),
+                "scenario_id": row.get("scenario_id", row["well"]),
                 "aquifer": row.get("aquifer", ""),
                 "rejected_model": row["model_b"],
                 "dominating_model": row["model_a"],
@@ -445,6 +497,8 @@ def build_model_ranking(risk_summary, pairwise, models, loss, bootstrap_method, 
         "bootstrap_method",
         "block_size",
         "n_wells",
+        "n_scenarios",
+        "n_seeds",
         "mean_risk",
         "mean_win_probability",
         "dominance_count",
@@ -463,6 +517,8 @@ def build_model_ranking(risk_summary, pairwise, models, loss, bootstrap_method, 
         split_risk = risk_summary[risk_summary["split"] == split]
         split_pairwise = pairwise[pairwise["split"] == split] if not pairwise.empty else pairwise
         wells = sorted(split_risk["well"].unique())
+        scenarios = sorted(split_risk["scenario_id"].unique()) if "scenario_id" in split_risk.columns else wells
+        seeds = sorted(split_risk["seed"].dropna().unique()) if "seed" in split_risk.columns else []
         for model in models:
             model_risk = split_risk[split_risk["model"] == model]
             as_a = split_pairwise[split_pairwise["model_a"] == model] if not split_pairwise.empty else split_pairwise
@@ -483,10 +539,10 @@ def build_model_ranking(risk_summary, pairwise, models, loss, bootstrap_method, 
                 trend_wins = split_pairwise.iloc[0:0]
                 trend_losses = split_pairwise.iloc[0:0]
             rejected_scenarios = {
-                (row["split"], row["well"]) for _, row in stable_losses.iterrows()
+                (row["split"], row.get("scenario_id", row["well"])) for _, row in stable_losses.iterrows()
             }
             possible_scenarios = {
-                (row["split"], row["well"]) for _, row in model_risk.iterrows()
+                (row["split"], row.get("scenario_id", row["well"])) for _, row in model_risk.iterrows()
             }
             rejected_count = len(rejected_scenarios)
             non_rejected_count = len(possible_scenarios - rejected_scenarios)
@@ -500,6 +556,8 @@ def build_model_ranking(risk_summary, pairwise, models, loss, bootstrap_method, 
                     "bootstrap_method": bootstrap_method,
                     "block_size": _ranking_block_size(model_risk, block_size),
                     "n_wells": len(wells),
+                    "n_scenarios": len(scenarios),
+                    "n_seeds": len([seed for seed in seeds if str(seed) != ""]),
                     "mean_risk": float(model_risk["mean_risk"].mean()) if not model_risk.empty else np.nan,
                     "mean_win_probability": (
                         float(as_a["p_a_better_than_b"].mean()) if not as_a.empty else np.nan
@@ -626,7 +684,7 @@ def write_dynamic_gated_report(ranking, pairwise_summary, target_model, result_d
     lines = [
         "# DynamicGatedStacking Reproducibility Report",
         "",
-        "This is a paper-inspired reproducible selection analysis based on test-set pointwise loss, block bootstrap R-distributions, and pairwise dominance probabilities.",
+        "This is a paper-inspired reproducible selection analysis based on test-set pointwise loss, block bootstrap R-distributions, pairwise dominance probabilities, and optional seed-level training variability.",
         "It is not a full hierarchical beta-process implementation because the fitted predictors are not generative probabilistic models.",
         "",
     ]
@@ -649,6 +707,7 @@ def write_dynamic_gated_report(ranking, pairwise_summary, target_model, result_d
                 f"- Lowest mean empirical risk model: `{best_model}`.",
                 f"- `{target_model}` mean empirical risk: {float(target_row['mean_risk']):.6g}.",
                 f"- `{target_model}` mean pairwise win probability: {float(target_row['mean_win_probability']):.3f}.",
+                f"- Analyzed scenarios: {int(target_row.get('n_scenarios', target_row['n_wells']))}; seeds: {int(target_row.get('n_seeds', 0))}.",
                 f"- Reproducible threshold: {float(repro_threshold):.2f}; trend threshold: {float(trend_threshold):.2f}.",
                 "",
             ]

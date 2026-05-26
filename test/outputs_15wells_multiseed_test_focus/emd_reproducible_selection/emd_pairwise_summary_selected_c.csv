@@ -1,0 +1,13 @@
+model_a,model_b,selected_c,mean_p_a_better_than_b,scenario_count,reproducible_count,trend_count,dominance_label
+DynamicGatedStacking,LSTM,0.0,0.6002533333333333,150,2,36,unstable
+DynamicGatedStacking,TCN,0.0,0.68532,150,11,58,unstable
+DynamicGatedStacking,Transformer,0.0,0.52816,150,1,25,unstable
+LSTM,DynamicGatedStacking,0.0,0.3997466666666667,150,0,4,unstable
+LSTM,TCN,0.0,0.5828866666666667,150,12,43,unstable
+LSTM,Transformer,0.0,0.4348666666666666,150,0,19,unstable
+TCN,DynamicGatedStacking,0.0,0.31468,150,0,0,unstable
+TCN,LSTM,0.0,0.4171133333333333,150,1,31,unstable
+TCN,Transformer,0.0,0.3544066666666667,150,1,8,unstable
+Transformer,DynamicGatedStacking,0.0,0.4718400000000001,150,0,14,unstable
+Transformer,LSTM,0.0,0.5651333333333334,150,3,43,unstable
+Transformer,TCN,0.0,0.6455933333333334,150,15,47,unstable

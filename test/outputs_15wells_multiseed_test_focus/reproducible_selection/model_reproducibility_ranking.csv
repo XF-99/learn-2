@@ -1,0 +1,5 @@
+split,model,loss,bootstrap_method,block_size,n_wells,n_scenarios,n_seeds,mean_risk,mean_win_probability,dominance_count,rejected_count,non_rejected_count,stable_win_count,stable_loss_count,trend_win_count,trend_loss_count
+test,LSTM,squared,block,8,15,150,10,0.06729502355835569,0.4061568888888889,201,76,74,58,143,81,85
+test,Transformer,squared,block,8,15,150,10,0.06515100084619957,0.6025728888888888,143,18,132,114,29,103,95
+test,TCN,squared,block,8,15,150,10,0.08642814554871012,0.28982622222222226,225,94,56,39,186,52,105
+test,DynamicGatedStacking,squared,block,8,15,150,10,0.06489882845241716,0.7014440000000001,199,23,127,173,26,105,56

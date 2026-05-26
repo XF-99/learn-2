@@ -36,7 +36,7 @@ DEFAULT_ARGS = [
     "--batch_size",
     "128",
     "--peak_plot_models",
-    "lstm,transformer,tcn,stacking,dynamic",
+    "lstm,transformer,tcn,dynamic",
     "--out_dir",
     "outputs_15wells_peak_focus",
 ]

@@ -2,6 +2,9 @@
 import argparse
 import json
 import os
+import platform
+import random
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -312,8 +315,14 @@ class DynamicGateRegressor(nn.Module):
 
 
 def set_seed(seed: int) -> None:
+    random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    if hasattr(torch.backends, "cudnn"):
+        torch.backends.cudnn.benchmark = False
+        torch.backends.cudnn.deterministic = True
 
 
 def load_data(path: str) -> pd.DataFrame:
@@ -531,12 +540,28 @@ def mc_dropout_predict(
     return stacked.mean(axis=0), stacked.std(axis=0)
 
 
-def metrics(y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, float]:
+def _legacy_metrics_unused(y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, float]:
     # 在该任务下 NSE 与 R2 等价，保留两者便于水文报告。
     rmse = mean_squared_error(y_true, y_pred) ** 0.5
     mae = mean_absolute_error(y_true, y_pred)
     r2 = r2_score(y_true, y_pred)
     nse = 1 - np.sum((y_true - y_pred) ** 2) / np.sum((y_true - np.mean(y_true)) ** 2)
+    return {"RMSE": rmse, "MAE": mae, "R2": r2, "NSE": nse}
+
+
+def metrics(y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, float]:
+    # R2/NSE are undefined for single-point or constant-target slices.
+    y_true = np.asarray(y_true, dtype=float)
+    y_pred = np.asarray(y_pred, dtype=float)
+    rmse = mean_squared_error(y_true, y_pred) ** 0.5
+    mae = mean_absolute_error(y_true, y_pred)
+    denominator = float(np.sum((y_true - np.mean(y_true)) ** 2))
+    if len(y_true) < 2 or denominator <= 1e-12:
+        r2 = np.nan
+        nse = np.nan
+    else:
+        r2 = r2_score(y_true, y_pred)
+        nse = 1 - float(np.sum((y_true - y_pred) ** 2)) / denominator
     return {"RMSE": rmse, "MAE": mae, "R2": r2, "NSE": nse}
 
 
@@ -1539,6 +1564,7 @@ def run_well(
         SequenceDataset(split.X_train, split.y_train),
         batch_size=batch_size,
         shuffle=True,
+        generator=torch.Generator().manual_seed(seed),
     )
     val_loader = DataLoader(
         SequenceDataset(split.X_val, split.y_val),
@@ -2004,6 +2030,26 @@ def summarize_metrics(
     plt.close(g.fig)
 
 
+def write_run_metadata(args: argparse.Namespace, device: torch.device, wells: List[Tuple[str, str]]) -> None:
+    metadata = {
+        "seed": int(args.seed),
+        "python": sys.version,
+        "platform": platform.platform(),
+        "torch": torch.__version__,
+        "cuda_available": bool(torch.cuda.is_available()),
+        "cuda_version": torch.version.cuda,
+        "device": str(device),
+        "cudnn_benchmark": bool(torch.backends.cudnn.benchmark),
+        "cudnn_deterministic": bool(torch.backends.cudnn.deterministic),
+        "args": vars(args),
+        "wells": [{"path": str(path), "label": str(label)} for path, label in wells],
+    }
+    if torch.cuda.is_available():
+        metadata["cuda_device_name"] = torch.cuda.get_device_name(0)
+    with open(os.path.join(args.out_dir, "run_metadata.json"), "w", encoding="utf-8") as f:
+        json.dump(metadata, f, ensure_ascii=False, indent=2, default=str)
+
+
 def main() -> None:
     # 绋嬪簭鍏ュ彛锛氳В鏋愬弬鏁板苟閫愪簳杩愯銆?
     parser = argparse.ArgumentParser()
@@ -2074,6 +2120,7 @@ def main() -> None:
     all_metrics: Dict[str, Dict[str, Dict[str, Dict[str, float]]]] = {}
     peak_plot_models = [m.strip().lower() for m in args.peak_plot_models.split(",") if m.strip()]
     os.makedirs(args.out_dir, exist_ok=True)
+    write_run_metadata(args, device, wells)
 
     for file_path, aquifer in wells:
         well_id = aquifer
