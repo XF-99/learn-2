@@ -1,0 +1,130 @@
+{
+  "seed": 45,
+  "python": "3.12.3 | packaged by Anaconda, Inc. | (main, May  6 2024, 19:46:43) [GCC 11.2.0]",
+  "platform": "Linux-5.15.0-78-generic-x86_64-with-glibc2.35",
+  "torch": "2.7.0+cu128",
+  "cuda_available": true,
+  "cuda_version": "12.8",
+  "device": "cuda",
+  "cudnn_benchmark": false,
+  "cudnn_deterministic": true,
+  "paper_future_holdout_label": "paper_future_holdout_52w",
+  "args": {
+    "lookback": 18,
+    "horizon": 1,
+    "train_ratio": 0.65,
+    "val_ratio": 0.15,
+    "selection_ratio": 0.1,
+    "calib_ratio": 0.05,
+    "epochs": 60,
+    "batch_size": 128,
+    "lr": 0.001,
+    "patience": 10,
+    "dropout": 0.1,
+    "lstm_head_activation": "gelu",
+    "tcn_channels": [
+      32,
+      32,
+      32,
+      32
+    ],
+    "tcn_kernel": 3,
+    "mc_dropout_samples": 30,
+    "gate_hidden": 16,
+    "gate_epochs": 80,
+    "gate_lr": 0.001,
+    "gate_patience": 10,
+    "dynamic_residual_n_estimators": 50,
+    "dynamic_residual_max_depth": 1,
+    "dynamic_residual_lr": 0.03,
+    "dynamic_residual_reg_lambda": 10.0,
+    "dynamic_residual_min_child_weight": 5.0,
+    "enable_dynamic_residual": true,
+    "enable_dynamic_gate": true,
+    "seed": 45,
+    "wells_dir": "/root/seed/combo4_cand004/outputs/candidate_groups/cand004",
+    "out_dir": "/root/seed/combo4_cand004/outputs/interval_wci/seed_45",
+    "holdout_steps": 52,
+    "future_steps": null,
+    "gamma": 0.5,
+    "lambda_t": 0.02,
+    "interval_width_scale": 1.0,
+    "cwc_penalty_lambda": 1.0,
+    "disable_intervals": false,
+    "disable_explain": true,
+    "include_selection_metrics": true,
+    "enable_peak_analysis": false,
+    "peak_tolerance": null,
+    "peak_prominence_scale": null,
+    "peak_distance_min": 1,
+    "peak_plot_models": "lstm,transformer,tcn,dynamic",
+    "shap_bg_samples": 80,
+    "shap_explain_samples": 40,
+    "explain_sample_index": 0,
+    "well_parallel_jobs": 10,
+    "well_parallel_tmp_dir": null
+  },
+  "wells": [
+    {
+      "path": "/root/seed/combo4_cand004/outputs/candidate_groups/cand004/f_BY_83614_weekly.csv",
+      "label": "裂隙水1"
+    },
+    {
+      "path": "/root/seed/combo4_cand004/outputs/candidate_groups/cand004/f_HE_6253_weekly.csv",
+      "label": "裂隙水2"
+    },
+    {
+      "path": "/root/seed/combo4_cand004/outputs/candidate_groups/cand004/f_HE_7824_weekly.csv",
+      "label": "裂隙水3"
+    },
+    {
+      "path": "/root/seed/combo4_cand004/outputs/candidate_groups/cand004/f_NW_100140762_weekly.csv",
+      "label": "裂隙水4"
+    },
+    {
+      "path": "/root/seed/combo4_cand004/outputs/candidate_groups/cand004/f_SN_52410759_weekly.csv",
+      "label": "裂隙水5"
+    },
+    {
+      "path": "/root/seed/combo4_cand004/outputs/candidate_groups/cand004/k_BW_100-813-7_weekly.csv",
+      "label": "岩溶水1"
+    },
+    {
+      "path": "/root/seed/combo4_cand004/outputs/candidate_groups/cand004/k_BW_103-763-0_weekly.csv",
+      "label": "岩溶水2"
+    },
+    {
+      "path": "/root/seed/combo4_cand004/outputs/candidate_groups/cand004/k_BY_15120_weekly.csv",
+      "label": "岩溶水3"
+    },
+    {
+      "path": "/root/seed/combo4_cand004/outputs/candidate_groups/cand004/k_NW_91163705_weekly.csv",
+      "label": "岩溶水4"
+    },
+    {
+      "path": "/root/seed/combo4_cand004/outputs/candidate_groups/cand004/k_NW_91174909_weekly.csv",
+      "label": "岩溶水5"
+    },
+    {
+      "path": "/root/seed/combo4_cand004/outputs/candidate_groups/cand004/p_SN_46460564_weekly.csv",
+      "label": "孔隙水1"
+    },
+    {
+      "path": "/root/seed/combo4_cand004/outputs/candidate_groups/cand004/p_HE_12117_weekly.csv",
+      "label": "孔隙水2"
+    },
+    {
+      "path": "/root/seed/combo4_cand004/outputs/candidate_groups/cand004/p_RP_2378140100_weekly.csv",
+      "label": "孔隙水3"
+    },
+    {
+      "path": "/root/seed/combo4_cand004/outputs/candidate_groups/cand004/p_BB_32455305_weekly.csv",
+      "label": "孔隙水4"
+    },
+    {
+      "path": "/root/seed/combo4_cand004/outputs/candidate_groups/cand004/p_BB_30400591_weekly.csv",
+      "label": "孔隙水5"
+    }
+  ],
+  "cuda_device_name": "NVIDIA GeForce RTX 4090 D"
+}

@@ -1,2 +1,0 @@
-gated_only_selection_RMSE,residual_selection_RMSE,use_residual,residual_enabled,n_estimators,max_depth,learning_rate,subsample,colsample_bytree,reg_lambda,min_child_weight
-0.10520805840438636,0.1040301117228102,True,True,50,1,0.03,0.7,0.8,10.0,5.0

@@ -1,0 +1,5 @@
+well,model,true_peak_count,pred_peak_count,tp,fp,fn,precision,recall,f1,detection_rate,amplitude_mae,amplitude_rmse,amplitude_mape,max_amplitude_error,mean_timing_error,std_timing_error,max_timing_error,composite_score
+岩溶水5,LSTM,2,2,0,2,2,0.0,0.0,0.0,0.0,,,,,,,,0.0
+岩溶水5,Transformer,2,3,2,1,0,0.6666666666666666,1.0,0.8,1.0,0.07712937919367846,0.08046608641857961,0.017897191735492667,0.10006079713326699,1.0,0.0,1.0,0.7999463180323582
+岩溶水5,TCN,2,3,0,3,2,0.0,0.0,0.0,0.0,,,,,,,,0.0
+岩溶水5,DynamicGatedStacking,2,2,1,1,1,0.5,0.5,0.5,0.5,0.2173467281837702,0.2173467281837702,0.0503992413179757,0.2173467281837702,1.0,0.0,1.0,0.6498488784401656

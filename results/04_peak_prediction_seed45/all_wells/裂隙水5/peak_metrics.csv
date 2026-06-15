@@ -1,0 +1,5 @@
+well,model,true_peak_count,pred_peak_count,tp,fp,fn,precision,recall,f1,detection_rate,amplitude_mae,amplitude_rmse,amplitude_mape,max_amplitude_error,mean_timing_error,std_timing_error,max_timing_error,composite_score
+裂隙水5,LSTM,1,1,0,1,1,0.0,0.0,0.0,0.0,,,,,,,,0.0
+裂隙水5,Transformer,1,2,1,1,0,0.5,1.0,0.6666666666666666,1.0,0.06154232805698712,0.06154232805698712,0.019071656406144322,0.06154232805698712,1.0,0.0,1.0,0.7332761292738765
+裂隙水5,TCN,1,1,1,0,0,1.0,1.0,1.0,1.0,0.1453120951202891,0.1453120951202891,0.045031483814276574,0.1453120951202891,3.0,0.0,3.0,0.8498649663562107
+裂隙水5,DynamicGatedStacking,1,2,0,2,1,0.0,0.0,0.0,0.0,,,,,,,,0.0

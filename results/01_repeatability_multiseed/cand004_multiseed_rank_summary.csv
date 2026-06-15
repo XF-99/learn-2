@@ -1,0 +1,13 @@
+split,model,mean_rank,best_count,n_seeds
+future_holdout,LSTM,1.6363636363636365,6,11
+future_holdout,DynamicGatedStacking,1.8181818181818181,3,11
+future_holdout,Transformer,2.909090909090909,2,11
+future_holdout,TCN,3.6363636363636362,0,11
+selection,DynamicGatedStacking,1.4545454545454546,6,11
+selection,Transformer,1.5454545454545454,5,11
+selection,TCN,3.0,0,11
+selection,LSTM,4.0,0,11
+test,DynamicGatedStacking,1.1818181818181819,9,11
+test,Transformer,1.8181818181818181,2,11
+test,LSTM,3.0,0,11
+test,TCN,4.0,0,11

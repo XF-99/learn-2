@@ -1,0 +1,13 @@
+split,model_a,model_b,mean_p_a_better_than_b,mean_p_b_better_than_a,mean_tie_rate,scenario_count,reproducible_count,trend_count,dominance_label
+test,DynamicGatedStacking,LSTM,0.7190266666666667,0.2809733333333334,0.0,15,6,5,trend
+test,DynamicGatedStacking,TCN,0.90844,0.09155999999999999,0.0,15,12,1,trend
+test,DynamicGatedStacking,Transformer,0.59092,0.4090800000000001,0.0,15,6,2,unstable
+test,LSTM,DynamicGatedStacking,0.2809733333333334,0.7190266666666667,0.0,15,1,3,unstable
+test,LSTM,TCN,0.80928,0.19071999999999997,0.0,15,6,6,trend
+test,LSTM,Transformer,0.3954533333333334,0.6045466666666666,0.0,15,3,2,unstable
+test,TCN,DynamicGatedStacking,0.09155999999999999,0.90844,0.0,15,0,0,unstable
+test,TCN,LSTM,0.19071999999999997,0.80928,0.0,15,0,1,unstable
+test,TCN,Transformer,0.23953333333333335,0.7604666666666666,0.0,15,1,1,unstable
+test,Transformer,DynamicGatedStacking,0.4090800000000001,0.59092,0.0,15,2,4,unstable
+test,Transformer,LSTM,0.6045466666666666,0.3954533333333334,0.0,15,5,4,unstable
+test,Transformer,TCN,0.7604666666666666,0.23953333333333335,0.0,15,6,6,trend

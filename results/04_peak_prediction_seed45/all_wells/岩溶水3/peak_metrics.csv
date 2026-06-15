@@ -1,0 +1,5 @@
+well,model,true_peak_count,pred_peak_count,tp,fp,fn,precision,recall,f1,detection_rate,amplitude_mae,amplitude_rmse,amplitude_mape,max_amplitude_error,mean_timing_error,std_timing_error,max_timing_error,composite_score
+岩溶水3,LSTM,0,0,0,0,0,1.0,1.0,1.0,1.0,,,,,,,,1.0
+岩溶水3,Transformer,0,1,0,1,0,0.0,0.0,0.0,0.0,,,,,,,,0.0
+岩溶水3,TCN,0,1,0,1,0,0.0,0.0,0.0,0.0,,,,,,,,0.0
+岩溶水3,DynamicGatedStacking,0,1,0,1,0,0.0,0.0,0.0,0.0,,,,,,,,0.0

@@ -1,7 +1,25 @@
 __pycache__/
 *.pyc
 .vscode/
+.claude/
 vendor/
+*.zip
+*.log
+*.tmp
+*.bak
+
+# Local experiment workspaces not included in the GitHub sharing package.
+/learn/
+/yun/
+/test/
+/test2/
+/test3/
+/test4/
+/test5/
+/cloud_t1_runner/
 /outputs*/
-/test.zip
-/test/outputs_15wells_multiseed_test_focus/reproducible_selection/risk_distribution_samples.csv
+/__pycache__/
+/CHANGELOG.md
+/peak_regeneration_status.csv
+/regenerate_peak_outputs.py
+/test_peak_analysis_across_experiments.py

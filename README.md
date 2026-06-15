@@ -1,146 +1,117 @@
-# 地下水水位预测项目
+# Groundwater Level Forecasting With DynamicGatedStacking
 
-本仓库当前只保留 **15 口井 DynamicGatedStacking 探索性筛选实验**。旧实验主线、早期 dropout/lookback 实验和无关输出已经从主线删除。
+这个仓库是 `combo4_cand004` 实验的 GitHub 展示版，保留了论文写作和结果复核需要的核心代码、输入数据和主要结果。旧的筛选过程、中间日志、缓存、临时并行目录和过大的原始工作区文件不再放入仓库。
 
-本结果是探索性筛选结果，不作为独立无偏泛化结论。当前判断只关注 `test` split，`future_holdout` 不参与模型选择结论。
+当前最稳的论文口径是：
 
-## 目录结构
+> DynamicGatedStacking 在多 seed 测试期点预测中表现出最强且最稳定的平均优势；WCI/CWC 区间预测、峰值预测和 SHAP 分析作为代表性 seed 的补充诊断，用于说明不确定性、峰值事件捕捉能力和模型解释性。
+
+## 快速入口
+
+- 中文详细说明：[README_zh.md](README_zh.md)
+- English package guide: [README_en.md](README_en.md)
+- WRR 投稿叙事与证据边界：[docs/WRR_story_and_evidence_zh.md](docs/WRR_story_and_evidence_zh.md)
+- 结果目录说明：[results/README_zh.md](results/README_zh.md)
+
+## 仓库结构
 
 ```text
 .
+├── code/       # 训练、评估、多 seed、WCI/CWC 和汇总脚本
+├── data/       # combo4_cand004 的 15 口井周尺度输入数据
+├── docs/       # WRR 叙事、证据边界和写作说明
+├── results/    # 多 seed 主结果和 seed45 代表性诊断结果
 ├── README.md
-├── CHANGELOG.md
-└── test/
-    ├── learn.py
-    ├── run_15wells_test_focus.py
-    ├── run_15wells_interval_focus.py
-    ├── run_15wells_shap_focus.py
-    ├── run_15wells_peak_focus.py
-    ├── run_15wells_lookback_sweep.py
-    ├── reproducible_model_selection.py
-    ├── selected_weekly_data_15wells_current/
-    └── outputs_15wells_interval_focus/
+├── README_zh.md
+└── README_en.md
 ```
 
-根目录只放项目级说明文件。15 口井实验的代码、数据、输出和测试都集中在 `test/` 目录。
+## 主要证据
 
-## 当前数据
+### 1. 多 seed 点预测
 
-15 口井数据位于：
+主证据位于：
 
 ```text
-test/selected_weekly_data_15wells_current/
+results/01_repeatability_multiseed/
 ```
 
-三类含水层各 5 口井：
+重点文件：
 
-| 类型代码 | 中文类型 | 井数 |
-| --- | --- | ---: |
-| f | 裂隙水 | 5 |
-| k | 岩溶水 | 5 |
-| p | 孔隙水 | 5 |
+- `cand004_multiseed_model_summary.csv`
+- `cand004_multiseed_rank_summary.csv`
 
-每口井使用自己的原始可用时间跨度，不强制统一起止日期。字段固定为：
+测试期 seeds 40-50 的核心结果：
+
+| Model | Test mean NRMSE | Std | Mean rank | Best count |
+|---|---:|---:|---:|---:|
+| DynamicGatedStacking | 0.070388 | 0.000873 | 1.18 | 9/11 |
+| Transformer | 0.071492 | 0.001190 | 1.82 | 2/11 |
+| LSTM | 0.078062 | 0.000917 | 3.00 | 0/11 |
+| TCN | 0.083291 | 0.001772 | 4.00 | 0/11 |
+
+这部分支持“DynamicGatedStacking 在测试期点预测中具有可重复的平均优势”。
+
+### 2. 区间预测和不确定性诊断
+
+代表性 seed45 结果位于：
 
 ```text
-Date,TASMAX,TAS,TASMIN,Humidity,Precipitation,GWL
+results/03_interval_prediction_wci_cwc_seed45/
 ```
 
-井清单和候选记录：
+WCI 是区间构造/校准方法，CWC95 是区间评价指标。seed45 结果显示测试期 PICP95 接近 95%，但 future holdout 覆盖率明显下降，因此更适合写作“不确定性诊断揭示长期外推边界”，不要写成长期预测已经被解决。
+
+### 3. 峰值预测和 SHAP
+
+代表性 seed45 诊断结果位于：
 
 ```text
-test/selected_weekly_data_15wells_current/selected_wells_summary.csv
-test/selected_weekly_data_15wells_current/candidate_wells_ranked.csv
+results/04_peak_prediction_seed45/
+results/05_shap_explainability_seed45/
 ```
 
-## 当前模型
+每个目录中：
 
-当前保留并输出这些模型：
+- `representative_examples/` 保留三类含水层各一个代表井，方便快速浏览。
+- `all_wells/` 保留 15 口井全部图件，方便后续挑选主文或补充材料图。
 
-- `LSTM`
-- `Transformer`
-- `TCN`
-- `DynamicGatedStacking`
+峰值预测和 SHAP 当前是代表性诊断，不是多 seed 可重复性主证据。
 
-当前不再输出：
+## 如何复跑
 
-- `Persistence`
-- `Stacking`
-- `DynamicGatedOnly`
-- `AdaptiveWeightedStacking`
+这些脚本最初在 Linux + CUDA 环境下运行。移动到其他机器时，需要检查 shell 脚本中的路径和 Python 环境。
 
-`DynamicGatedStacking` 使用 MC Dropout 深度模型预测、动态门控加权融合，以及弱 XGBoost 残差修正。残差是否启用由 selection split 做安全判断。
+多 seed final 点预测：
 
-## 运行命令
-
-点预测：
-
-```powershell
-C:\Users\xf-99\.conda\envs\Python39\python.exe test\run_15wells_test_focus.py
+```bash
+bash code/run_cand004_multiseed_final.sh
 ```
 
-区间预测：
+seed45 区间预测/WCI/CWC：
 
-```powershell
-C:\Users\xf-99\.conda\envs\Python39\python.exe test\run_15wells_interval_focus.py
+```bash
+bash code/launch_interval_wci_seed45_parallel10.sh
 ```
 
-SHAP 和峰值分析：
+多 seed 汇总：
 
-```powershell
-C:\Users\xf-99\.conda\envs\Python39\python.exe test\run_15wells_shap_focus.py
-C:\Users\xf-99\.conda\envs\Python39\python.exe test\run_15wells_peak_focus.py
+```bash
+python code/summarize_cand004_multiseed.py
 ```
 
-所有 15 口井入口都会检查 GPU。如果 `torch.cuda.is_available()` 为 false，脚本会直接停止。
+## 结果使用边界
 
-## 当前输出
+可以写：
 
-当前保留的正式区间预测输出：
+- DynamicGatedStacking 是当前最方便、最稳的主集成模型选择。
+- 测试期点预测具有多 seed 可重复优势。
+- 区间预测揭示了 future holdout 外推不确定性。
+- 峰值预测和 SHAP 增强了结果解释和水文诊断。
 
-```text
-test/outputs_15wells_interval_focus/
-```
+不要写：
 
-核心结果：
-
-| 模型 | RMSE | NSE | PICP95 | MPIW95 |
-| --- | ---: | ---: | ---: | ---: |
-| DynamicGatedStacking | 0.1853 | 0.9210 | 0.9518 | 0.7622 |
-| Transformer | 0.1891 | 0.9195 | 0.9600 | 0.8173 |
-| LSTM | 0.1927 | 0.9127 | 0.9496 | 0.8098 |
-| TCN | 0.2078 | 0.9023 | 0.9562 | 0.8466 |
-
-按类型看，DynamicGatedStacking 在岩溶水上平均 RMSE 最优；孔隙水和裂隙水上 Transformer 略优。但 15 口井整体平均 RMSE 仍是 DynamicGatedStacking 最低。
-
-## 可重复性分析
-
-可重复性分析脚本位于：
-
-```text
-test/reproducible_model_selection.py
-```
-
-它使用 test 逐点 squared loss、block bootstrap 和成对概率 `P(R_A < R_B)` 构造 paper-inspired R-distribution 风险分布。默认只分析 `test`，并排除 `Persistence`、`Stacking`、`DynamicGatedOnly`、`AdaptiveWeightedStacking`。
-
-推荐命令：
-
-```powershell
-C:\Users\xf-99\.conda\envs\Python39\python.exe test\reproducible_model_selection.py --out_dir test\outputs_15wells_interval_focus --splits test --bootstrap_method block --block_size 8 --bootstrap_samples 5000 --seed 42 --target_model DynamicGatedStacking
-```
-
-主要输出：
-
-```text
-test/outputs_15wells_interval_focus/reproducible_selection/
-```
-
-当前可重复性分析显示：DynamicGatedStacking 的平均 empirical risk 最低；对 LSTM 和 TCN 是趋势优势，对 Transformer 的优势不稳定。因此这里只写作探索性筛选优势，不写作稳定显著优于。
-
-## 验证
-
-编译检查：
-
-```powershell
-python -m py_compile test\learn.py test\reproducible_model_selection.py test\run_15wells_test_focus.py test\run_15wells_interval_focus.py test\run_15wells_shap_focus.py test\run_15wells_peak_focus.py test\run_15wells_lookback_sweep.py
-```
+- DynamicGatedStacking 在所有时间段和所有指标上都显著最优。
+- 模型已经解决非平稳地下水长期外推。
+- SHAP 证明了地下水变化的因果机制。
+- 区间、峰值和 SHAP 已经完成多 seed 验证。
