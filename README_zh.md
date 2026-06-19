@@ -4,6 +4,7 @@
 
 如果要面向 WRR 投稿组织论文叙事和证据边界，先看：
 
+- `docs/WRR_manuscript_story_zh.md`
 - `docs/WRR_story_and_evidence_zh.md`
 
 ## 证据层级和目录位置

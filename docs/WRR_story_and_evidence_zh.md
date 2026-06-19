@@ -31,7 +31,7 @@ WRR 的官方定位是水文学和水资源领域的跨学科原创研究，关�
 | 候选数据组 | `combo4_cand004` | 论文和分享包中使用的最终数据支持；不建议在正文展开候选筛选过程。 |
 | 主集成模型 | `DynamicGatedStacking` | 作为主模型写，不要频繁替换成其他中文译名。 |
 | 基线模型 | `LSTM`, `Transformer`, `TCN` | 三个单模型基线。 |
-| 可重复性 | 可重复 | 用户已指定用“可重复”，避免写“可复现”。 |
+| 可重复性 | 可重复 | 用户已指定用“可重复”，避免换用其他中文译法。 |
 | WCI | Weighted Conformal Inference | 区间构造/校准方法，不是评价指标。 |
 | CWC95 | Coverage Width-based Criterion at 95% | 区间评价指标，综合覆盖率和区间宽度。 |
 | PICP95 | Prediction Interval Coverage Probability at 95% | 95% 预测区间覆盖率。 |

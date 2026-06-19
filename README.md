@@ -10,6 +10,7 @@
 
 - 中文详细说明：[README_zh.md](README_zh.md)
 - English package guide: [README_en.md](README_en.md)
+- WRR 论文故事线草案：[docs/WRR_manuscript_story_zh.md](docs/WRR_manuscript_story_zh.md)
 - WRR 投稿叙事与证据边界：[docs/WRR_story_and_evidence_zh.md](docs/WRR_story_and_evidence_zh.md)
 - 结果目录说明：[results/README_zh.md](results/README_zh.md)
 
